@@ -35,7 +35,7 @@ export default async function AdminEntryPage({ searchParams }: { searchParams: S
   const profile = profileResult.data;
 
   if (user && profile?.role === "admin") {
-    redirect("/");
+    redirect("/admin/overview");
   }
 
   const showBootstrapAdmin = (adminCount ?? 0) === 0;
@@ -53,19 +53,10 @@ export default async function AdminEntryPage({ searchParams }: { searchParams: S
       <section className="admin-login-shell">
         <aside className="admin-login-brand">
           <div className="admin-login-brand__logo">
-            <div className="admin-login-brand__mark">CO</div>
-            <div>
-              <p className="admin-login-brand__wordmark">
-                Complete<span>Omics</span>
-              </p>
-            </div>
+            <img className="brand-logo brand-logo--full" src="/completeomics-logo.png" alt="Complete Omics" />
           </div>
 
-          <h1>CompleteOmics</h1>
-          <p>
-            Secure administrative access to manage companies, customers, sample intake, and system
-            operations.
-          </p>
+          <h1>Admin Portal</h1>
 
           <a className="admin-login-panel__link admin-login-panel__link--brand" href="/">
             Back to customer portal
@@ -84,7 +75,7 @@ export default async function AdminEntryPage({ searchParams }: { searchParams: S
           )}
 
           <form action={signInAction} className="admin-login-form">
-            <input type="hidden" name="redirect_to" value="/admin" />
+            <input type="hidden" name="redirect_to" value="/admin/overview" />
             <div className="field">
               <label>Email</label>
               <input name="email" type="email" placeholder="Enter here" required />
@@ -100,7 +91,7 @@ export default async function AdminEntryPage({ searchParams }: { searchParams: S
 
           {showBootstrapAdmin && (
             <form action={bootstrapAdminAction} className="admin-login-bootstrap">
-              <input type="hidden" name="redirect_to" value="/admin" />
+              <input type="hidden" name="redirect_to" value="/admin/overview" />
               <p className="eyebrow">Initial Setup</p>
               <h3>Create the first admin</h3>
               <div className="form-grid">

@@ -276,6 +276,7 @@ export async function signOutAction() {
 export async function createCompanyAction(formData: FormData) {
   await requireAdminSession();
   const admin = createSupabaseAdminClient();
+  const redirectPath = getRedirectPath(formData, "/admin/intake");
 
   const { error } = await admin.from("companies").insert({
     name: getValue(formData, "name"),
@@ -286,20 +287,22 @@ export async function createCompanyAction(formData: FormData) {
     postal_code: optionalValue(formData, "postal_code"),
     contact_phone: optionalValue(formData, "contact_phone"),
     contact_email: optionalValue(formData, "contact_email"),
+    fax_number: optionalValue(formData, "fax_number"),
   });
 
   if (error) {
-    redirectWith("error", error.message);
+    redirectWithPath(redirectPath, "error", error.message);
   }
 
   revalidatePath("/");
-  redirectWith("message", "Company created.");
+  redirectWithPath(redirectPath, "message", "Company created.");
 }
 
 export async function updateCompanyAction(formData: FormData) {
   await requireAdminSession();
   const admin = createSupabaseAdminClient();
   const companyId = getValue(formData, "id");
+  const redirectPath = getRedirectPath(formData, "/admin/clinics");
 
   const { error } = await admin
     .from("companies")
@@ -311,15 +314,16 @@ export async function updateCompanyAction(formData: FormData) {
       postal_code: optionalValue(formData, "postal_code"),
       contact_phone: optionalValue(formData, "contact_phone"),
       contact_email: optionalValue(formData, "contact_email"),
+      fax_number: optionalValue(formData, "fax_number"),
     })
     .eq("id", companyId);
 
   if (error) {
-    redirectWith("error", error.message);
+    redirectWithPath(redirectPath, "error", error.message);
   }
 
   revalidatePath("/");
-  redirectWith("message", "Company updated.");
+  redirectWithPath(redirectPath, "message", "Company updated.");
 }
 
 export async function updateUserProfileAction(formData: FormData) {
@@ -328,9 +332,10 @@ export async function updateUserProfileAction(formData: FormData) {
   const profileId = getValue(formData, "id");
   const nextRole = getValue(formData, "role");
   const nextCompanyId = nextRole === "admin" ? null : optionalValue(formData, "company_id");
+  const redirectPath = getRedirectPath(formData, "/admin/accounts");
 
   if (user.id === profileId && nextRole !== "admin") {
-    redirectWith("error", "Your current session must remain an admin.");
+    redirectWithPath(redirectPath, "error", "Your current session must remain an admin.");
   }
 
   const { error } = await admin
@@ -344,16 +349,17 @@ export async function updateUserProfileAction(formData: FormData) {
     .eq("id", profileId);
 
   if (error) {
-    redirectWith("error", error.message);
+    redirectWithPath(redirectPath, "error", error.message);
   }
 
   revalidatePath("/");
-  redirectWith("message", "User profile updated.");
+  redirectWithPath(redirectPath, "message", "User profile updated.");
 }
 
 export async function createPatientAction(formData: FormData) {
   const { profile } = await requireSessionProfile();
   const companyId = resolveCompanyId(profile, formData);
+  const redirectPath = getRedirectPath(formData, "/admin/intake");
 
   const admin = profile.role === "admin" ? createSupabaseAdminClient() : null;
   const supabase = admin ?? (await createSupabaseServerClient());
@@ -363,9 +369,12 @@ export async function createPatientAction(formData: FormData) {
     first_name: getValue(formData, "first_name"),
     last_name: getValue(formData, "last_name"),
     date_of_birth: getValue(formData, "date_of_birth"),
+    address_line_1: optionalValue(formData, "address_line_1"),
     city: optionalValue(formData, "city"),
     state: optionalValue(formData, "state"),
     postal_code: optionalValue(formData, "postal_code"),
+    phone_number: optionalValue(formData, "phone_number"),
+    email_address: optionalValue(formData, "email_address"),
     race_ethnicity: optionalValue(formData, "race_ethnicity"),
     weight_lbs: normalizeFloatInput(optionalValue(formData, "weight_lbs")),
     height_inches: normalizeFloatInput(optionalValue(formData, "height_inches")),
@@ -374,17 +383,18 @@ export async function createPatientAction(formData: FormData) {
   });
 
   if (error) {
-    redirectWith("error", error.message);
+    redirectWithPath(redirectPath, "error", error.message);
   }
 
   revalidatePath("/");
-  redirectWith("message", "Patient added.");
+  redirectWithPath(redirectPath, "message", "Patient added.");
 }
 
 export async function updatePatientAction(formData: FormData) {
   await requireAdminSession();
   const admin = createSupabaseAdminClient();
   const patientId = getValue(formData, "id");
+  const redirectPath = getRedirectPath(formData, "/admin/operations");
 
   const { error } = await admin
     .from("patients")
@@ -393,9 +403,12 @@ export async function updatePatientAction(formData: FormData) {
       first_name: getValue(formData, "first_name"),
       last_name: getValue(formData, "last_name"),
       date_of_birth: getValue(formData, "date_of_birth"),
+      address_line_1: optionalValue(formData, "address_line_1"),
       city: optionalValue(formData, "city"),
       state: optionalValue(formData, "state"),
       postal_code: optionalValue(formData, "postal_code"),
+      phone_number: optionalValue(formData, "phone_number"),
+      email_address: optionalValue(formData, "email_address"),
       race_ethnicity: optionalValue(formData, "race_ethnicity"),
       weight_lbs: normalizeFloatInput(optionalValue(formData, "weight_lbs")),
       height_inches: normalizeFloatInput(optionalValue(formData, "height_inches")),
@@ -405,16 +418,17 @@ export async function updatePatientAction(formData: FormData) {
     .eq("id", patientId);
 
   if (error) {
-    redirectWith("error", error.message);
+    redirectWithPath(redirectPath, "error", error.message);
   }
 
   revalidatePath("/");
-  redirectWith("message", "Patient updated.");
+  redirectWithPath(redirectPath, "message", "Patient updated.");
 }
 
 export async function createPackageAction(formData: FormData) {
   const { profile } = await requireSessionProfile();
   const companyId = resolveCompanyId(profile, formData);
+  const redirectPath = getRedirectPath(formData, "/admin/intake");
 
   const admin = profile.role === "admin" ? createSupabaseAdminClient() : null;
   const supabase = admin ?? (await createSupabaseServerClient());
@@ -430,17 +444,18 @@ export async function createPackageAction(formData: FormData) {
   });
 
   if (error) {
-    redirectWith("error", error.message);
+    redirectWithPath(redirectPath, "error", error.message);
   }
 
   revalidatePath("/");
-  redirectWith("message", "Package added.");
+  redirectWithPath(redirectPath, "message", "Package added.");
 }
 
 export async function updatePackageAction(formData: FormData) {
   await requireAdminSession();
   const admin = createSupabaseAdminClient();
   const packageId = getValue(formData, "id");
+  const redirectPath = getRedirectPath(formData, "/admin/operations");
 
   const { error } = await admin
     .from("fedex_packages")
@@ -453,16 +468,17 @@ export async function updatePackageAction(formData: FormData) {
     .eq("id", packageId);
 
   if (error) {
-    redirectWith("error", error.message);
+    redirectWithPath(redirectPath, "error", error.message);
   }
 
   revalidatePath("/");
-  redirectWith("message", "Package updated.");
+  redirectWithPath(redirectPath, "message", "Package updated.");
 }
 
 export async function createSampleAction(formData: FormData) {
   const { profile } = await requireSessionProfile();
   const companyId = resolveCompanyId(profile, formData);
+  const redirectPath = getRedirectPath(formData, "/admin/intake");
 
   const admin = profile.role === "admin" ? createSupabaseAdminClient() : null;
   const supabase = admin ?? (await createSupabaseServerClient());
@@ -486,16 +502,17 @@ export async function createSampleAction(formData: FormData) {
   });
 
   if (error) {
-    redirectWith("error", error.message);
+    redirectWithPath(redirectPath, "error", error.message);
   }
 
   revalidatePath("/");
-  redirectWith("message", "Sample submitted.");
+  redirectWithPath(redirectPath, "message", "Sample submitted.");
 }
 
 export async function createCustomerIntakeAction(formData: FormData) {
   const { profile } = await requireSessionProfile();
   const companyId = resolveCompanyId(profile, formData);
+  const redirectPath = getRedirectPath(formData);
 
   const admin = profile.role === "admin" ? createSupabaseAdminClient() : null;
   const supabase = admin ?? (await createSupabaseServerClient());
@@ -508,7 +525,7 @@ export async function createCustomerIntakeAction(formData: FormData) {
     const dateOfBirth = getValue(formData, "date_of_birth");
 
     if (!firstName || !lastName || !dateOfBirth) {
-      redirectWith("error", "Choose an existing patient or enter first name, last name, and date of birth.");
+      redirectWithPath(redirectPath, "error", "Choose an existing patient or enter first name, last name, and date of birth.");
     }
 
     const { data: patient, error: patientError } = await supabase
@@ -518,9 +535,12 @@ export async function createCustomerIntakeAction(formData: FormData) {
         first_name: firstName,
         last_name: lastName,
         date_of_birth: dateOfBirth,
+        address_line_1: optionalValue(formData, "address_line_1"),
         city: optionalValue(formData, "city"),
         state: optionalValue(formData, "state"),
         postal_code: optionalValue(formData, "postal_code"),
+        phone_number: optionalValue(formData, "phone_number"),
+        email_address: optionalValue(formData, "email_address"),
         race_ethnicity: optionalValue(formData, "race_ethnicity"),
         weight_lbs: normalizeFloatInput(optionalValue(formData, "weight_lbs")),
         height_inches: normalizeFloatInput(optionalValue(formData, "height_inches")),
@@ -533,7 +553,7 @@ export async function createCustomerIntakeAction(formData: FormData) {
       .single();
 
     if (patientError || !patient) {
-      redirectWith("error", patientError?.message ?? "Patient could not be created.");
+      redirectWithPath(redirectPath, "error", patientError?.message ?? "Patient could not be created.");
     }
 
     patientId = patient.id;
@@ -542,24 +562,29 @@ export async function createCustomerIntakeAction(formData: FormData) {
   let fedexPackageId: string | null = null;
   const skipPackage = getValue(formData, "skip_package") === "true";
   const packageValue = getValue(formData, "package_id");
+  const existingPackageId = packageValue.includes(" | ") ? parseLookupValue(packageValue) : null;
 
   if (!skipPackage && packageValue) {
-    const { data: fedexPackage, error: packageError } = await supabase
-      .from("fedex_packages")
-      .insert({
-        company_id: companyId,
-        package_id: packageValue,
-        mailed_at: normalizeDateTimeInput(optionalValue(formData, "mailed_at")),
-        received_at: null,
-      })
-      .select("id")
-      .single();
+    if (existingPackageId) {
+      fedexPackageId = existingPackageId;
+    } else {
+      const { data: fedexPackage, error: packageError } = await supabase
+        .from("fedex_packages")
+        .insert({
+          company_id: companyId,
+          package_id: packageValue,
+          mailed_at: normalizeDateTimeInput(optionalValue(formData, "mailed_at")),
+          received_at: null,
+        })
+        .select("id")
+        .single();
 
-    if (packageError || !fedexPackage) {
-      redirectWith("error", packageError?.message ?? "FedEx package could not be created.");
+      if (packageError || !fedexPackage) {
+        redirectWithPath(redirectPath, "error", packageError?.message ?? "FedEx package could not be created.");
+      }
+
+      fedexPackageId = fedexPackage.id;
     }
-
-    fedexPackageId = fedexPackage.id;
   }
 
   const { error } = await supabase.from("samples").insert({
@@ -568,7 +593,7 @@ export async function createCustomerIntakeAction(formData: FormData) {
     patient_id: patientId,
     fedex_package_id: fedexPackageId,
     collected_at: normalizeDateInput(optionalValue(formData, "collected_at")),
-    received_at: null,
+    received_at: profile.role === "admin" ? normalizeDateInput(optionalValue(formData, "received_at")) : null,
     collected_by: optionalValue(formData, "collected_by"),
     missing_info: optionalValue(formData, "missing_info"),
     sex: optionalValue(formData, "sex"),
@@ -577,15 +602,15 @@ export async function createCustomerIntakeAction(formData: FormData) {
     hart_cve: formData.has("hart_cve") || getValue(formData, "hart_cve") === "true",
     icd10_codes: normalizeIcd10CodesFromForm(formData),
     npi_number: optionalValue(formData, "npi_number"),
-    status: "submitted",
+    status: profile.role === "admin" ? getValue(formData, "status") || "submitted" : "submitted",
   });
 
   if (error) {
-    redirectWith("error", error.message);
+    redirectWithPath(redirectPath, "error", error.message);
   }
 
   revalidatePath("/");
-  redirectWith("message", "Sample intake submitted.");
+  redirectWithPath(redirectPath, "message", "Sample intake submitted.");
 }
 
 export async function updateSampleAction(formData: FormData) {
@@ -593,6 +618,7 @@ export async function updateSampleAction(formData: FormData) {
   const admin = createSupabaseAdminClient();
   const sampleId = getValue(formData, "id");
   const rejected = getValue(formData, "rejected") === "true";
+  const redirectPath = getRedirectPath(formData, "/admin/samples");
 
   const { error } = await admin
     .from("samples")
@@ -620,25 +646,26 @@ export async function updateSampleAction(formData: FormData) {
     .eq("id", sampleId);
 
   if (error) {
-    redirectWith("error", error.message);
+    redirectWithPath(redirectPath, "error", error.message);
   }
 
   revalidatePath("/");
-  redirectWith("message", "Sample updated.");
+  redirectWithPath(redirectPath, "message", "Sample updated.");
 }
 
 export async function uploadDocumentAction(formData: FormData) {
   const uploadCandidate = formData.get("document");
+  const redirectPath = getRedirectPath(formData);
 
   if (!(uploadCandidate instanceof File) || uploadCandidate.size === 0) {
-    redirectWith("error", "Choose a document before uploading.");
+    redirectWithPath(redirectPath, "error", "Choose a document before uploading.");
   }
 
   const fileToUpload = uploadCandidate;
   const { profile, user } = await requireSessionProfile();
   const companyId = resolveCompanyId(profile, formData);
-  const patientId = optionalValue(formData, "patient_id");
-  const sampleId = optionalValue(formData, "sample_id");
+  const patientId = parseLookupValue(optionalValue(formData, "patient_id")) ?? optionalValue(formData, "patient_id");
+  const sampleId = parseLookupValue(optionalValue(formData, "sample_id")) ?? optionalValue(formData, "sample_id");
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
   const cleanName = fileToUpload.name.replace(/[^a-zA-Z0-9._-]/g, "-");
   const storagePath = `${companyId}/${patientId ?? "unassigned"}/${timestamp}-${cleanName}`;
@@ -653,7 +680,7 @@ export async function uploadDocumentAction(formData: FormData) {
     });
 
   if (uploadError) {
-    redirectWith("error", uploadError.message);
+    redirectWithPath(redirectPath, "error", uploadError.message);
   }
 
   const { error: metadataError } = await client.from("patient_documents").insert({
@@ -667,9 +694,9 @@ export async function uploadDocumentAction(formData: FormData) {
   });
 
   if (metadataError) {
-    redirectWith("error", metadataError.message);
+    redirectWithPath(redirectPath, "error", metadataError.message);
   }
 
   revalidatePath("/");
-  redirectWith("message", "Document uploaded.");
+  redirectWithPath(redirectPath, "message", "Document uploaded.");
 }

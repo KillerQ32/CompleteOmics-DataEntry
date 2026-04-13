@@ -19,7 +19,7 @@ function CompanyOptions({ companies }: { companies: CompanyRow[] }) {
   return (
     <>
       <option value="" disabled>
-        Select a company
+        Select a clinic
       </option>
       {companies.map((company) => (
         <option key={company.id} value={company.id}>
@@ -67,17 +67,10 @@ export default async function SignupPage({ searchParams }: { searchParams: Searc
       <section className="customer-login-shell">
         <aside className="customer-login-brand">
           <div className="customer-login-brand__logo">
-            <div className="customer-login-brand__mark">CO</div>
-            <p className="customer-login-brand__wordmark">
-              Complete<span>Omics</span>
-            </p>
+            <img className="brand-logo brand-logo--full" src="/completeomics-logo.png" alt="Complete Omics" />
           </div>
 
           <h1>Create Account</h1>
-          <p>
-            Register a customer account for your clinic or hospital and start entering patient and
-            sample information online.
-          </p>
         </aside>
 
         <section className="customer-login-panel customer-signup-panel">
@@ -118,7 +111,7 @@ export default async function SignupPage({ searchParams }: { searchParams: Searc
               </div>
             </div>
             <div className="field">
-              <label>Company</label>
+              <label>Clinic</label>
               <select name="company_id" defaultValue="" required>
                 <CompanyOptions companies={companies} />
               </select>

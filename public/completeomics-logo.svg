@@ -1,0 +1,19 @@
+<svg width="840" height="150" viewBox="0 0 840 150" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="840" height="150" fill="transparent"/>
+  <g font-family="Aptos, Segoe UI, Arial, sans-serif" font-size="74" font-weight="300" letter-spacing="1">
+    <text x="12" y="96" fill="#171717">complete</text>
+    <text x="485" y="96" fill="#171717">mics</text>
+  </g>
+  <g opacity="0.7">
+    <line x1="326" y1="22" x2="430" y2="22" stroke="#45d8dc" stroke-width="3"/>
+    <line x1="326" y1="32" x2="430" y2="32" stroke="#45d8dc" stroke-width="3"/>
+    <line x1="326" y1="42" x2="430" y2="42" stroke="#45d8dc" stroke-width="3"/>
+    <line x1="326" y1="52" x2="430" y2="52" stroke="#45d8dc" stroke-width="3"/>
+    <line x1="326" y1="62" x2="430" y2="62" stroke="#45d8dc" stroke-width="3"/>
+    <line x1="326" y1="72" x2="430" y2="72" stroke="#45d8dc" stroke-width="3"/>
+    <line x1="326" y1="82" x2="430" y2="82" stroke="#45d8dc" stroke-width="3"/>
+    <line x1="326" y1="92" x2="430" y2="92" stroke="#45d8dc" stroke-width="3"/>
+  </g>
+  <path d="M381 11C381 11 348 56 348 81C348 104 363 121 381 121C399 121 414 104 414 81C414 56 381 11 381 11Z" fill="#ef1d2f"/>
+  <path d="M352 81C352 99 364 113 381 113" stroke="#b41120" stroke-width="5" stroke-linecap="round" opacity="0.5"/>
+</svg>
