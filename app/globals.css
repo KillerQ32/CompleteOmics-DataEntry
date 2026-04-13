@@ -1472,6 +1472,8 @@ textarea {
 
 .customer-site-link {
   position: relative;
+  display: inline-flex;
+  align-items: center;
   padding: 11px 14px;
   color: #28384c;
   font-size: 0.92rem;
@@ -1506,19 +1508,156 @@ textarea {
   align-items: center;
 }
 
-.customer-site-nav__meta span {
-  max-width: 220px;
-  color: #4f6173;
-  font-size: 0.84rem;
-  font-weight: 800;
-  text-align: right;
+.customer-menu-button {
+  display: grid;
+  grid-template-columns: repeat(3, 5px);
+  gap: 5px;
+  align-content: center;
+  justify-content: center;
+  width: 46px;
+  height: 46px;
+  border: 1px solid rgba(214, 17, 36, 0.12);
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 12px 26px rgba(150, 34, 44, 0.08);
+  cursor: pointer;
 }
 
-.customer-site-nav__meta .button {
-  margin-top: 0;
-  color: #d61124;
+.customer-menu-button span {
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  background: #172032;
+}
+
+.customer-menu-button:hover span {
+  background: #d61124;
+}
+
+.customer-menu-toggle {
+  position: fixed;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.customer-menu-scrim {
+  position: fixed;
+  z-index: 29;
+  inset: 0;
+  background: rgba(11, 21, 34, 0.32);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 180ms ease;
+}
+
+.customer-drawer {
+  position: fixed;
+  z-index: 30;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  display: grid;
+  align-content: start;
+  gap: 22px;
+  width: min(340px, calc(100vw - 42px));
+  padding: 28px;
+  border-left: 1px solid rgba(214, 17, 36, 0.14);
+  background:
+    radial-gradient(circle at 18% 8%, rgba(214, 17, 36, 0.12), transparent 12rem),
+    #fff;
+  box-shadow: -22px 0 60px rgba(49, 18, 23, 0.18);
+  transform: translateX(105%);
+  transition: transform 220ms ease;
+}
+
+.customer-drawer__header {
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.customer-drawer__close {
+  display: inline-grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
   border: 1px solid rgba(214, 17, 36, 0.14);
-  background: rgba(214, 17, 36, 0.07);
+  border-radius: 14px;
+  color: #d61124;
+  background: rgba(214, 17, 36, 0.08);
+  font-size: 0.9rem;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.customer-drawer__close span {
+  position: relative;
+  display: block;
+  width: 16px;
+  height: 16px;
+}
+
+.customer-drawer__close span::before,
+.customer-drawer__close span::after {
+  position: absolute;
+  top: 7px;
+  left: 0;
+  width: 16px;
+  height: 2px;
+  border-radius: 999px;
+  background: currentColor;
+  content: "";
+}
+
+.customer-drawer__close span::before {
+  transform: rotate(45deg);
+}
+
+.customer-drawer__close span::after {
+  transform: rotate(-45deg);
+}
+
+.customer-drawer__close:hover {
+  color: #fff;
+  background: #d61124;
+}
+
+.customer-drawer h2 {
+  margin: 8px 0 0;
+  color: #172032;
+  font-size: 1.4rem;
+}
+
+.customer-drawer__nav {
+  display: grid;
+  gap: 10px;
+}
+
+.customer-drawer .customer-site-link {
+  display: flex;
+  padding: 14px 16px;
+  border: 1px solid rgba(214, 17, 36, 0.12);
+  border-radius: 16px;
+  background: linear-gradient(180deg, #fff, #fff7f8);
+}
+
+.customer-drawer .customer-site-link::after {
+  display: none;
+}
+
+.customer-drawer .customer-site-link--active {
+  border-color: rgba(214, 17, 36, 0.28);
+  background: rgba(214, 17, 36, 0.1);
+}
+
+.customer-menu-toggle:checked ~ .customer-menu-scrim {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.customer-menu-toggle:checked ~ .customer-drawer {
+  transform: translateX(0);
 }
 
 .customer-site-content {
@@ -1556,9 +1695,14 @@ textarea {
   line-height: 1.8;
 }
 
+.customer-status-banner {
+  margin-bottom: 18px;
+}
+
 .customer-panel {
   border-color: rgba(214, 17, 36, 0.16);
   box-shadow: 0 18px 48px rgba(214, 17, 36, 0.1);
+  animation: customerPageIn 240ms ease both;
 }
 
 .customer-panel .panel {
@@ -1651,6 +1795,110 @@ textarea {
   color: #d61124;
   font-size: 0.88rem;
   font-weight: 800;
+}
+
+.customer-contact-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.customer-contact-card {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+}
+
+.customer-contact-card h3 {
+  overflow-wrap: anywhere;
+}
+
+.customer-contact-page {
+  padding: clamp(26px, 5vw, 54px);
+  border: 1px solid rgba(214, 17, 36, 0.16);
+  border-radius: 34px;
+  background:
+    radial-gradient(circle at 12% 12%, rgba(214, 17, 36, 0.12), transparent 18rem),
+    linear-gradient(135deg, #fff 0%, #fff6f7 52%, #fff 100%);
+  box-shadow: 0 24px 70px rgba(150, 34, 44, 0.12);
+}
+
+.customer-contact-hero {
+  max-width: 920px;
+  margin-bottom: 28px;
+}
+
+.customer-contact-hero h2 {
+  margin: 0;
+  color: #172032;
+  font-family: "Aptos Display", Aptos, "Segoe UI Variable Display", sans-serif;
+  font-size: clamp(2.3rem, 5vw, 4.8rem);
+  line-height: 0.98;
+}
+
+.customer-contact-hero p {
+  max-width: 720px;
+  color: #4f6173;
+  line-height: 1.8;
+}
+
+.customer-contact-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(300px, 0.75fr);
+  gap: 22px;
+  align-items: start;
+}
+
+.customer-contact-form {
+  box-shadow: 0 16px 40px rgba(150, 34, 44, 0.09);
+}
+
+.customer-contact-form .button {
+  width: fit-content;
+}
+
+.customer-contact-info {
+  display: grid;
+  gap: 14px;
+}
+
+.customer-contact-info__card {
+  display: grid;
+  gap: 8px;
+  padding: 22px;
+  border: 1px solid rgba(214, 17, 36, 0.14);
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.78);
+  box-shadow: 0 16px 34px rgba(150, 34, 44, 0.08);
+}
+
+.customer-contact-info__card h3 {
+  margin: 0;
+  color: #172032;
+  overflow-wrap: anywhere;
+}
+
+.customer-contact-info__card span,
+.customer-contact-info__card a {
+  color: #566c7e;
+  font-weight: 700;
+  line-height: 1.6;
+}
+
+.customer-contact-info__card a {
+  color: #d61124;
+}
+
+@keyframes customerPageIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .customer-steps {
@@ -1828,6 +2076,8 @@ textarea {
 
   .customer-home__actions,
   .customer-home__summary,
+  .customer-contact-grid,
+  .customer-contact-layout,
   .customer-steps,
   .review-grid,
   .admin-login-shell,
@@ -1845,12 +2095,7 @@ textarea {
   }
 
   .customer-site-nav__meta {
-    width: 100%;
-    justify-content: space-between;
-  }
-
-  .customer-site-nav__meta span {
-    text-align: left;
+    justify-content: flex-start;
   }
 
   .admin-utilitybar {

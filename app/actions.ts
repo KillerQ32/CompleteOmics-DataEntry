@@ -356,6 +356,26 @@ export async function updateUserProfileAction(formData: FormData) {
   redirectWithPath(redirectPath, "message", "User profile updated.");
 }
 
+export async function updateCustomerAccountAction(formData: FormData) {
+  const { supabase, user } = await requireSessionProfile();
+  const redirectPath = getRedirectPath(formData, "/?customer_view=account");
+
+  const { error } = await supabase
+    .from("user_profiles")
+    .update({
+      first_name: optionalValue(formData, "first_name"),
+      last_name: optionalValue(formData, "last_name"),
+    })
+    .eq("id", user.id);
+
+  if (error) {
+    redirectWithPath(redirectPath, "error", error.message);
+  }
+
+  revalidatePath("/");
+  redirectWithPath(redirectPath, "message", "Account information updated.");
+}
+
 export async function createPatientAction(formData: FormData) {
   const { profile } = await requireSessionProfile();
   const companyId = resolveCompanyId(profile, formData);

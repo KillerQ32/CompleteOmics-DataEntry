@@ -6,6 +6,7 @@ import {
   signInAction,
   signOutAction,
   signUpAction,
+  updateCustomerAccountAction,
   updateCompanyAction,
   updatePackageAction,
   updatePatientAction,
@@ -21,7 +22,7 @@ export const dynamic = "force-dynamic";
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 
-type CustomerView = "home" | "samples" | "intake" | "operations";
+type CustomerView = "home" | "samples" | "intake" | "operations" | "account" | "contact";
 type IntakeStep = "patient" | "sample" | "files" | "package" | "review";
 export type AdminPage = "overview" | "samples" | "intake" | "clinics" | "accounts" | "operations";
 
@@ -179,7 +180,13 @@ function readBooleanParam(searchParams: Record<string, string | string[] | undef
 }
 
 function normalizeCustomerView(value: string): CustomerView {
-  if (value === "samples" || value === "intake" || value === "operations") {
+  if (
+    value === "samples" ||
+    value === "intake" ||
+    value === "operations" ||
+    value === "account" ||
+    value === "contact"
+  ) {
     return value;
   }
 
@@ -628,53 +635,81 @@ function CustomerWorkspace({
         </nav>
 
         <div className="customer-site-nav__meta">
-          <span title={`Signed in as ${userEmail}`}>{company?.name ?? "Clinic Portal"}</span>
-          <form action={signOutAction}>
-            <button className="button button--ghost" type="submit">
-              Sign Out
-            </button>
-          </form>
+          <label className="customer-menu-button" htmlFor="customer-menu-toggle" aria-label="Open customer menu">
+            {Array.from({ length: 9 }, (_, index) => (
+              <span key={index} />
+            ))}
+          </label>
         </div>
       </header>
 
+      <input className="customer-menu-toggle" id="customer-menu-toggle" type="checkbox" aria-hidden="true" />
+      <label className="customer-menu-scrim" htmlFor="customer-menu-toggle" aria-label="Close customer menu" />
+      <aside className="customer-drawer" aria-label="Customer menu">
+        <div className="customer-drawer__header">
+          <div>
+            <p className="eyebrow">Portal Menu</p>
+            <h2>{company?.name ?? "Complete Omics"}</h2>
+          </div>
+          <label className="customer-drawer__close" htmlFor="customer-menu-toggle" aria-label="Close customer menu">
+            <span />
+          </label>
+        </div>
+        <nav className="customer-drawer__nav">
+          <CustomerShellLink href="/?customer_view=home" label="Home" active={customerView === "home"} />
+          <CustomerShellLink href="/?customer_view=samples" label="Clinic Samples" active={customerView === "samples"} />
+          <CustomerShellLink href="/?customer_view=intake&intake_step=patient" label="Add Sample" active={customerView === "intake"} />
+          <CustomerShellLink href="/?customer_view=operations" label="File Uploads" active={customerView === "operations"} />
+          <CustomerShellLink href="/?customer_view=account" label="Account" active={customerView === "account"} />
+          <CustomerShellLink href="/?customer_view=contact" label="Contact Us" active={customerView === "contact"} />
+        </nav>
+        <form action={signOutAction}>
+          <button className="button button--secondary" type="submit">
+            Sign Out
+          </button>
+        </form>
+      </aside>
+
       <div className="customer-site-content">
-        <section className="customer-site-hero customer-header" id="customer-overview">
-          <div className="customer-site-hero__copy">
-            <div>
-              <p className="eyebrow">Customer Portal</p>
-              <h1>{profile?.first_name ? `${profile.first_name}'s Workspace` : "Portal Workspace"}</h1>
-              <p>
-                Submit patient and sample information directly into the Complete Omics database,
-                then track files and FedEx packages from one secure clinic workspace.
-              </p>
+        {customerView === "home" && (
+          <section className="customer-site-hero customer-header" id="customer-overview">
+            <div className="customer-site-hero__copy">
+              <div>
+                <p className="eyebrow">Customer Portal</p>
+                <h1>{profile?.first_name ? `${profile.first_name}'s Workspace` : "Portal Workspace"}</h1>
+                <p>
+                  Submit patient and sample information directly into the Complete Omics database,
+                  then track files and FedEx packages from one secure clinic workspace.
+                </p>
+              </div>
             </div>
-          </div>
 
-          <div className="admin-kpis">
-            <article>
-              <span>{samples.length}</span>
-              <p>Visible samples</p>
-            </article>
-            <article>
-              <span>{patients.length}</span>
-              <p>Patients in scope</p>
-            </article>
-            <article>
-              <span>{packages.length}</span>
-              <p>FedEx packages</p>
-            </article>
-            <article>
-              <span>{documents.length}</span>
-              <p>Tracked documents</p>
-            </article>
-          </div>
-
-          {(message || error) && (
-            <div className={`status-banner ${error ? "status-banner--error" : ""}`}>
-              {error || message}
+            <div className="admin-kpis">
+              <article>
+                <span>{samples.length}</span>
+                <p>Visible samples</p>
+              </article>
+              <article>
+                <span>{patients.length}</span>
+                <p>Patients in scope</p>
+              </article>
+              <article>
+                <span>{packages.length}</span>
+                <p>FedEx packages</p>
+              </article>
+              <article>
+                <span>{documents.length}</span>
+                <p>Tracked documents</p>
+              </article>
             </div>
-          )}
-        </section>
+          </section>
+        )}
+
+        {(message || error) && (
+          <div className={`status-banner customer-status-banner ${error ? "status-banner--error" : ""}`}>
+            {error || message}
+          </div>
+        )}
 
         {customerView === "home" && (
           <section className="admin-panel customer-panel customer-home">
@@ -1277,6 +1312,168 @@ function CustomerWorkspace({
           </article>
           </div>
         </section>}
+
+        {customerView === "account" && (
+          <section className="admin-panel customer-panel" id="customer-account">
+            <div className="admin-panel__header">
+              <div>
+                <p className="eyebrow">Account</p>
+                <h2>Account information</h2>
+              </div>
+            </div>
+
+            <div className="create-grid">
+              <form action={updateCustomerAccountAction} className="panel form-panel">
+                <input type="hidden" name="redirect_to" value="/?customer_view=account" />
+                <p className="eyebrow">Profile</p>
+                <h3>Update your name</h3>
+                <div className="form-grid">
+                  <div className="field">
+                    <label>First name</label>
+                    <input name="first_name" defaultValue={profile?.first_name ?? ""} placeholder="Enter here" />
+                  </div>
+                  <div className="field">
+                    <label>Last name</label>
+                    <input name="last_name" defaultValue={profile?.last_name ?? ""} placeholder="Enter here" />
+                  </div>
+                  <div className="field">
+                    <label>Email</label>
+                    <input value={userEmail} readOnly />
+                  </div>
+                  <div className="field">
+                    <label>Clinic</label>
+                    <input value={company?.name ?? "Clinic not assigned"} readOnly />
+                  </div>
+                </div>
+                <button className="button button--primary" type="submit">
+                  Save Account
+                </button>
+              </form>
+
+              <article className="panel">
+                <p className="eyebrow">Clinic Details</p>
+                <h3>{company?.name ?? "Assigned clinic"}</h3>
+                <div className="list-grid">
+                  <div className="list-row">
+                    <strong>Address</strong>
+                    <span>
+                      {[company?.address_line_1, company?.city, company?.state, company?.postal_code]
+                        .filter(Boolean)
+                        .join(", ") || "Not provided"}
+                    </span>
+                  </div>
+                  <div className="list-row">
+                    <strong>Clinic Contact</strong>
+                    <span>{company?.contact_phone ?? "Phone not provided"}</span>
+                    <span>{company?.contact_email ?? "Email not provided"}</span>
+                  </div>
+                </div>
+              </article>
+            </div>
+          </section>
+        )}
+
+        {customerView === "contact" && (
+          <section className="customer-contact-page customer-panel" id="customer-contact">
+            <div className="customer-contact-hero">
+              <p className="eyebrow">Contact Us</p>
+              <h2>We are looking forward to hearing from YOU!</h2>
+              <p>
+                Send a question, request support, or reach out about Complete Omics services.
+                Your message can be routed to the right team by purpose.
+              </p>
+            </div>
+
+            <div className="customer-contact-layout">
+              <form className="panel form-panel customer-contact-form">
+                <div className="form-grid">
+                  <div className="field">
+                    <label>First name</label>
+                    <input name="first_name" defaultValue={profile?.first_name ?? ""} placeholder="Enter here" />
+                  </div>
+                  <div className="field">
+                    <label>Last name</label>
+                    <input name="last_name" defaultValue={profile?.last_name ?? ""} placeholder="Enter here" />
+                  </div>
+                  <div className="field">
+                    <label>Email</label>
+                    <input name="email" type="email" defaultValue={userEmail} placeholder="Enter here" />
+                  </div>
+                  <div className="field">
+                    <label>Institution</label>
+                    <input name="institution" defaultValue={company?.name ?? ""} placeholder="Enter here" />
+                  </div>
+                  <div className="field">
+                    <label>Purpose of Contact</label>
+                    <select name="purpose" defaultValue="">
+                      <option value="" disabled>
+                        Select a category
+                      </option>
+                      <option>Customer portal support</option>
+                      <option>Ask a question</option>
+                      <option>Request a quote</option>
+                      <option>Apply for a job</option>
+                      <option>Other</option>
+                    </select>
+                  </div>
+                  <div className="field">
+                    <label>How did you hear about us?</label>
+                    <select name="source" defaultValue="">
+                      <option value="" disabled>
+                        Select a channel
+                      </option>
+                      <option>Complete Omics website</option>
+                      <option>Clinic referral</option>
+                      <option>Conference or event</option>
+                      <option>Publication</option>
+                      <option>Search engine</option>
+                      <option>Other</option>
+                    </select>
+                  </div>
+                </div>
+                <div className="field">
+                  <label>Comment or Message</label>
+                  <textarea
+                    name="message"
+                    rows={6}
+                    placeholder="Ask a question / request a quote / apply for a job / or message us about anything."
+                  />
+                </div>
+                <a
+                  className="button button--primary"
+                  href={`mailto:info@completeomics.com?subject=${encodeURIComponent("Complete Omics portal contact")}`}
+                >
+                  Send Message by Email
+                </a>
+              </form>
+
+              <aside className="customer-contact-info">
+                <article className="customer-contact-info__card">
+                  <p className="eyebrow">Have a Project?</p>
+                  <h3>info@completeomics.com</h3>
+                  <a href="mailto:info@completeomics.com">Email us</a>
+                </article>
+                <article className="customer-contact-info__card">
+                  <p className="eyebrow">Office</p>
+                  <h3>1448 South Rolling Rd</h3>
+                  <span>Baltimore, MD 21227</span>
+                </article>
+                <article className="customer-contact-info__card">
+                  <p className="eyebrow">Phone</p>
+                  <h3>+1 410 215 2760</h3>
+                  <a href="tel:+14102152760">Call Complete Omics</a>
+                </article>
+                <article className="customer-contact-info__card">
+                  <p className="eyebrow">Website</p>
+                  <h3>completeomics.com</h3>
+                  <a href="https://www.completeomics.com/contact-us/" target="_blank" rel="noreferrer">
+                    Open public contact page
+                  </a>
+                </article>
+              </aside>
+            </div>
+          </section>
+        )}
       </div>
     </main>
   );
@@ -2794,8 +2991,7 @@ export default async function Home({ searchParams }: { searchParams: SearchParam
   let sampleQuery = supabase
     .from("sample_search")
     .select("id, sample_number, status, rejected, collected_at, received_at, patient_full_name, company_name, package_id")
-    .order("collected_at", { ascending: false })
-    .limit(100);
+    .order("collected_at", { ascending: false });
 
   if (q) {
     const safeQuery = q.replace(/[,]/g, " ");
