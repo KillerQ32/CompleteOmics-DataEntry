@@ -34,7 +34,7 @@ export default async function AdminEntryPage({ searchParams }: { searchParams: S
 
   const profile = profileResult.data;
 
-  if (user && profile?.role === "admin") {
+  if (user && (profile?.role === "admin" || profile?.role === "clinic_admin")) {
     redirect("/admin/overview");
   }
 
@@ -76,6 +76,7 @@ export default async function AdminEntryPage({ searchParams }: { searchParams: S
 
           <form action={signInAction} className="admin-login-form">
             <input type="hidden" name="redirect_to" value="/admin/overview" />
+            <input type="hidden" name="login_scope" value="admin" />
             <div className="field">
               <label>Email</label>
               <input name="email" type="email" placeholder="Enter here" required />

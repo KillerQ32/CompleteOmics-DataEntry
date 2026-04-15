@@ -920,6 +920,44 @@ textarea {
   align-items: center;
 }
 
+.admin-record-list--samples .admin-record-list__head,
+.admin-record-list--samples .admin-record__summary {
+  grid-template-columns: 1.05fr 1.05fr 1.05fr 0.82fr 0.55fr 0.68fr 0.62fr 0.78fr 0.82fr;
+}
+
+.admin-sample-column-filters {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 18px;
+  padding: 18px;
+  border: 1px solid rgba(31, 95, 145, 0.12);
+  border-radius: 22px;
+  background: #f7fbff;
+}
+
+.admin-sample-column-filters .admin-record-list__head,
+.admin-sample-filter-row {
+  display: grid;
+  grid-template-columns: 1.05fr 1.05fr 1.05fr 0.82fr 0.55fr 0.68fr 0.62fr 0.78fr 0.82fr;
+  gap: 12px;
+  align-items: center;
+}
+
+.admin-sample-filter-row input,
+.admin-sample-filter-row select {
+  min-width: 0;
+  padding: 11px 12px;
+  border-radius: 14px;
+  font-size: 0.9rem;
+}
+
+.admin-sample-filter-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
 .admin-record-list--accounts .admin-record-list__head,
 .admin-record-list--accounts .admin-record__summary {
   grid-template-columns: 1.35fr 1fr 0.72fr 1.08fr 0.88fr 0.78fr;
@@ -1299,7 +1337,7 @@ textarea {
   opacity: 0.7;
   background:
     radial-gradient(circle at 30% 30%, rgba(255, 255, 255, 0.18), transparent 28%),
-    linear-gradient(180deg, rgba(215, 74, 87, 0.86), rgba(198, 66, 79, 0.88));
+    linear-gradient(180deg, rgba(62, 143, 196, 0.76), rgba(23, 61, 99, 0.86));
   filter: blur(1px);
 }
 
@@ -1350,11 +1388,11 @@ textarea {
   grid-template-columns: minmax(320px, 1.1fr) minmax(420px, 0.9fr);
   width: min(1180px, calc(100% - 80px));
   min-height: 440px;
-  border: 1px solid rgba(214, 17, 36, 0.08);
+  border: 1px solid rgba(31, 95, 145, 0.12);
   border-radius: 26px;
   overflow: hidden;
   background: rgba(255, 255, 255, 0.97);
-  box-shadow: 0 28px 60px rgba(146, 53, 63, 0.12);
+  box-shadow: 0 28px 60px rgba(17, 55, 89, 0.14);
 }
 
 .admin-login-brand {
@@ -1363,7 +1401,9 @@ textarea {
   gap: 24px;
   padding: 54px 56px 48px;
   color: #14243a;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(255, 255, 255, 0.92));
+  background:
+    radial-gradient(circle at 15% 10%, rgba(62, 143, 196, 0.12), transparent 16rem),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(247, 251, 255, 0.94));
 }
 
 .admin-login-brand h1 {
@@ -1423,7 +1463,7 @@ textarea {
 
 .admin-login-panel__header h2 {
   margin: 0 0 20px;
-  color: #cb2b39;
+  color: #1f5f91;
   font-family: "Aptos Display", Aptos, "Segoe UI Variable Display", sans-serif;
   font-size: clamp(2.2rem, 3vw, 3rem);
   line-height: 1.04;
@@ -1455,12 +1495,12 @@ textarea {
 
 .admin-login-panel .button--primary {
   color: #fff;
-  background: linear-gradient(90deg, #cf2a37, #c62534);
+  background: linear-gradient(90deg, #3e8fc4, #1f5f91);
 }
 
 .admin-login-panel .button--secondary {
-  color: #cb2b39;
-  background: rgba(203, 43, 57, 0.08);
+  color: #1f5f91;
+  background: rgba(31, 95, 145, 0.1);
 }
 
 .admin-login-panel__link {
@@ -2306,6 +2346,8 @@ textarea {
 
   .admin-kpis,
   .admin-toolbar,
+  .admin-sample-column-filters .admin-record-list__head,
+  .admin-sample-filter-row,
   .admin-record-list__head,
   .admin-record__summary {
     grid-template-columns: 1fr;

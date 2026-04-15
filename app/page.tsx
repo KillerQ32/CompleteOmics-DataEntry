@@ -118,10 +118,15 @@ type PackageRow = {
 type DocumentRow = {
   id: string;
   company_id: string;
-  patient_id: string | null;
-  sample_id: string | null;
+  company_name?: string;
+  patient_id: string;
+  patient_first_name?: string;
+  patient_last_name?: string;
+  sample_id: string;
+  sample_number?: string;
   original_filename: string;
   storage_path: string;
+  created_at?: string;
 };
 
 type IntakePatientDraft = {
@@ -454,6 +459,7 @@ async function AuthLanding({ error, message }: { error: string; message: string 
           )}
 
           <form action={signInAction} className="customer-login-form">
+            <input type="hidden" name="login_scope" value="customer" />
             <div className="field">
               <label>Email</label>
               <input name="email" type="email" placeholder="Enter here" required />
@@ -696,7 +702,7 @@ function CustomerWorkspace({
           />
           <CustomerShellLink
             href="/?customer_view=operations"
-            label="File Uploads"
+            label="Documents"
             active={customerView === "operations"}
           />
         </nav>
@@ -726,7 +732,7 @@ function CustomerWorkspace({
           <CustomerShellLink href="/?customer_view=home" label="Home" active={customerView === "home"} />
           <CustomerShellLink href="/?customer_view=samples" label="Clinic Samples" active={customerView === "samples"} />
           <CustomerShellLink href="/?customer_view=intake&intake_step=patient" label="Add Sample" active={customerView === "intake"} />
-          <CustomerShellLink href="/?customer_view=operations" label="File Uploads" active={customerView === "operations"} />
+          <CustomerShellLink href="/?customer_view=operations" label="Documents" active={customerView === "operations"} />
           <CustomerShellLink href="/?customer_view=account" label="Account" active={customerView === "account"} />
           <CustomerShellLink href="/?customer_view=contact" label="Contact Us" active={customerView === "contact"} />
           <CustomerShellLink href="/?customer_view=chat" label="Live Chat" active={customerView === "chat"} />
@@ -800,7 +806,7 @@ function CustomerWorkspace({
                 <span>4 guided steps</span>
               </a>
               <a className="panel customer-action-card" href="/?customer_view=operations">
-                <p className="eyebrow">Files</p>
+                <p className="eyebrow">Documents</p>
                 <h3>Upload documents</h3>
                 <span>{documents.length} tracked files</span>
               </a>
@@ -1101,30 +1107,11 @@ function CustomerWorkspace({
           {intakeStep === "files" && (
             <div className="panel form-panel customer-wizard">
               <p className="eyebrow">Step 3</p>
-              <h3>Upload files before you finish the FedEx details</h3>
-              <form action={uploadDocumentAction}>
-                <input type="hidden" name="redirect_to" value={filesStepHref} />
-                <input type="hidden" name="patient_id" value={patientDraft.patientId} />
-                <div className="field">
-                  <label>Patient</label>
-                  <input
-                    name="patient_id"
-                    list="customer-file-step-patient-options"
-                    defaultValue={patientDraft.patientId}
-                    placeholder="Type patient name"
-                  />
-                  <datalist id="customer-file-step-patient-options">
-                    <PatientLookupOptions patients={patients} />
-                  </datalist>
-                </div>
-                <div className="field">
-                  <label>File</label>
-                  <input name="document" type="file" accept=".pdf,image/png,image/jpeg" required />
-                </div>
-                <button className="button button--secondary" type="submit">
-                  Upload File
-                </button>
-              </form>
+              <h3>Documents are uploaded after the sample is created</h3>
+              <p className="signup-helper-text">
+                To keep every document tied to the correct patient and sample, finish the sample intake first.
+                After submission, use the Documents tab to upload files for that patient and sample.
+              </p>
               <div className="customer-wizard__actions">
                 <a className="button button--secondary" href={sampleStepHref}>
                   Back to Sample
@@ -1293,24 +1280,24 @@ function CustomerWorkspace({
         {customerView === "operations" && <section className="admin-panel customer-panel" id="customer-documents">
           <div className="admin-panel__header">
             <div>
-              <p className="eyebrow">File Uploads</p>
-              <h2>Upload documents</h2>
+              <p className="eyebrow">Documents</p>
+              <h2>Patient and sample documents</h2>
             </div>
           </div>
 
           <div className="create-grid">
           <form action={uploadDocumentAction} className="panel form-panel">
             <p className="eyebrow">Document Upload</p>
-            <h3>Attach files</h3>
+            <h3>Attach to patient and sample</h3>
             <div className="field">
               <label>Patient</label>
               <input
                 name="patient_id"
                 list="customer-upload-patient-options"
                 placeholder="Type patient name"
+                required
               />
               <datalist id="customer-upload-patient-options">
-                <option value="">Unassigned</option>
                 <PatientLookupOptions patients={patients} />
               </datalist>
             </div>
@@ -1320,9 +1307,9 @@ function CustomerWorkspace({
                 name="sample_id"
                 list="customer-upload-sample-options"
                 placeholder="Type sample number"
+                required
               />
               <datalist id="customer-upload-sample-options">
-                <option value="">Unassigned</option>
                 <SampleLookupOptions samples={samples} />
               </datalist>
             </div>
@@ -1351,28 +1338,18 @@ function CustomerWorkspace({
           </div>
 
           <div className="data-grid">
-          <article className="panel">
-            <p className="eyebrow">FedEx Packages</p>
-            <h3>Tracked shipments</h3>
-            <div className="list-grid">
-              {packages.map((entry) => (
-                <div className="list-row" key={entry.id}>
-                  <strong>{entry.package_id}</strong>
-                  <span>Mailed {formatDateTime(entry.mailed_at)} | Received {formatDateTime(entry.received_at)}</span>
-                </div>
-              ))}
-              {packages.length === 0 && <div className="empty-state">No packages recorded yet.</div>}
-            </div>
-          </article>
-
-          <article className="panel">
+          <article className="panel panel--wide">
             <p className="eyebrow">Uploaded Documents</p>
-            <h3>Metadata table</h3>
+            <h3>Search by patient or sample</h3>
             <div className="list-grid">
               {documents.map((document) => (
                 <div className="list-row" key={document.id}>
                   <strong>{document.original_filename}</strong>
-                  <span>{document.storage_path}</span>
+                  <span>
+                    {[document.patient_first_name, document.patient_last_name].filter(Boolean).join(" ") || "Patient not found"}
+                    {" | "}
+                    {document.sample_number ?? "Sample not found"}
+                  </span>
                 </div>
               ))}
               {documents.length === 0 && <div className="empty-state">No documents uploaded yet.</div>}
@@ -1549,7 +1526,7 @@ function CustomerWorkspace({
                 <p className="eyebrow">Live Chat</p>
                 <h2>Message Complete Omics Admin</h2>
               </div>
-              <span className="admin-panel__caption">UI preview for future Supabase realtime messaging.</span>
+              <span className="admin-panel__caption">UI preview for future realtime messaging.</span>
             </div>
 
             <section className="portal-chat-panel portal-chat-panel--standalone" aria-label="Portal live chat preview">
@@ -1593,6 +1570,16 @@ export async function loadAdminWorkspaceData(
   const companyFilter = readParam(resolvedSearchParams, "company_id");
   const statusFilter = readParam(resolvedSearchParams, "status");
   const rejectedFilter = readParam(resolvedSearchParams, "rejected");
+  const documentSearch = readParam(resolvedSearchParams, "document_q");
+  const adminSampleNumberFilter = readParam(resolvedSearchParams, "admin_sample_number");
+  const adminPatientFilter = readParam(resolvedSearchParams, "admin_patient");
+  const adminClinicFilter = readParam(resolvedSearchParams, "admin_clinic");
+  const adminStatusFilter = readParam(resolvedSearchParams, "admin_status");
+  const adminSexFilter = readParam(resolvedSearchParams, "admin_sex");
+  const adminHartCadhsFilter = readParam(resolvedSearchParams, "admin_hart_cadhs");
+  const adminHartCveFilter = readParam(resolvedSearchParams, "admin_hart_cve");
+  const adminCollectedFilter = readParam(resolvedSearchParams, "admin_collected");
+  const adminReceivedFilter = readParam(resolvedSearchParams, "admin_received");
   const intakeStep = normalizeIntakeStep(readParam(resolvedSearchParams, "intake_step"));
   const adminIntakeCompanyId = readParam(resolvedSearchParams, "admin_intake_company_id");
   const patientDraft: IntakePatientDraft = {
@@ -1687,6 +1674,66 @@ export async function loadAdminWorkspaceData(
     sampleQuery = sampleQuery.eq("rejected", rejectedFilter === "true");
   }
 
+  if (adminSampleNumberFilter) {
+    sampleQuery = sampleQuery.ilike("sample_number", `%${adminSampleNumberFilter}%`);
+  }
+
+  if (adminPatientFilter) {
+    const safePatient = adminPatientFilter.replace(/[,]/g, " ");
+    sampleQuery = sampleQuery.or(`patient_first_name.ilike.%${safePatient}%,patient_last_name.ilike.%${safePatient}%`);
+  }
+
+  if (adminClinicFilter) {
+    sampleQuery = sampleQuery.ilike("company_name", `%${adminClinicFilter}%`);
+  }
+
+  if (adminStatusFilter) {
+    sampleQuery = sampleQuery.eq("status", adminStatusFilter);
+  }
+
+  if (adminSexFilter) {
+    sampleQuery = sampleQuery.ilike("sex", `%${adminSexFilter}%`);
+  }
+
+  if (adminHartCadhsFilter === "true" || adminHartCadhsFilter === "false") {
+    sampleQuery = sampleQuery.eq("hart_cadhs", adminHartCadhsFilter === "true");
+  }
+
+  if (adminHartCveFilter === "true" || adminHartCveFilter === "false") {
+    sampleQuery = sampleQuery.eq("hart_cve", adminHartCveFilter === "true");
+  }
+
+  if (adminCollectedFilter) {
+    const nextCollectedDate = nextDateString(adminCollectedFilter);
+    if (nextCollectedDate) {
+      sampleQuery = sampleQuery.gte("collected_at", adminCollectedFilter).lt("collected_at", nextCollectedDate);
+    }
+  }
+
+  if (adminReceivedFilter) {
+    const nextReceivedDate = nextDateString(adminReceivedFilter);
+    if (nextReceivedDate) {
+      sampleQuery = sampleQuery.gte("received_at", adminReceivedFilter).lt("received_at", nextReceivedDate);
+    }
+  }
+
+  let documentQuery = admin
+    .from("document_directory")
+    .select("id, company_id, company_name, patient_id, patient_first_name, patient_last_name, sample_id, sample_number, original_filename, storage_path, created_at")
+    .order("created_at", { ascending: false })
+    .limit(100);
+
+  if (!isUltimateAdmin && staffCompanyId) {
+    documentQuery = documentQuery.eq("company_id", staffCompanyId);
+  }
+
+  if (documentSearch) {
+    const safeDocumentSearch = documentSearch.replace(/[,]/g, " ");
+    documentQuery = documentQuery.or(
+      `patient_first_name.ilike.%${safeDocumentSearch}%,patient_last_name.ilike.%${safeDocumentSearch}%,sample_number.ilike.%${safeDocumentSearch}%,original_filename.ilike.%${safeDocumentSearch}%`,
+    );
+  }
+
   const [
     companiesResult,
     clinicRequestsResult,
@@ -1725,12 +1772,7 @@ export async function loadAdminWorkspaceData(
         .match(!isUltimateAdmin && staffCompanyId ? { company_id: staffCompanyId } : {})
         .order("created_at", { ascending: false })
         .limit(10),
-      admin
-        .from("patient_documents")
-        .select("id, company_id, patient_id, sample_id, original_filename, storage_path")
-        .match(!isUltimateAdmin && staffCompanyId ? { company_id: staffCompanyId } : {})
-        .order("created_at", { ascending: false })
-        .limit(10),
+      documentQuery,
       admin.auth.admin.listUsers({ page: 1, perPage: 200 }),
     ]);
 
@@ -1756,6 +1798,16 @@ export async function loadAdminWorkspaceData(
     companyFilter,
     statusFilter,
     rejectedFilter,
+    documentSearch,
+    adminSampleNumberFilter,
+    adminPatientFilter,
+    adminClinicFilter,
+    adminStatusFilter,
+    adminSexFilter,
+    adminHartCadhsFilter,
+    adminHartCveFilter,
+    adminCollectedFilter,
+    adminReceivedFilter,
     isUltimateAdmin,
     userEmailById,
     intakeStep,
@@ -1782,6 +1834,16 @@ export function AdminWorkspace({
   companyFilter,
   statusFilter,
   rejectedFilter,
+  documentSearch,
+  adminSampleNumberFilter,
+  adminPatientFilter,
+  adminClinicFilter,
+  adminStatusFilter,
+  adminSexFilter,
+  adminHartCadhsFilter,
+  adminHartCveFilter,
+  adminCollectedFilter,
+  adminReceivedFilter,
   isUltimateAdmin,
   userEmailById,
   intakeStep,
@@ -1806,6 +1868,16 @@ export function AdminWorkspace({
   companyFilter: string;
   statusFilter: string;
   rejectedFilter: string;
+  documentSearch: string;
+  adminSampleNumberFilter: string;
+  adminPatientFilter: string;
+  adminClinicFilter: string;
+  adminStatusFilter: string;
+  adminSexFilter: string;
+  adminHartCadhsFilter: string;
+  adminHartCveFilter: string;
+  adminCollectedFilter: string;
+  adminReceivedFilter: string;
   isUltimateAdmin: boolean;
   userEmailById: Map<string, string>;
   intakeStep: IntakeStep;
@@ -1930,7 +2002,7 @@ export function AdminWorkspace({
           <a className={`admin-nav-item ${activePage === "intake" ? "admin-nav-item--active" : ""}`} href="/admin/intake">Create Records</a>
           <a className={`admin-nav-item ${activePage === "clinics" ? "admin-nav-item--active" : ""}`} href="/admin/clinics">Clinics</a>
           <a className={`admin-nav-item ${activePage === "accounts" ? "admin-nav-item--active" : ""}`} href="/admin/accounts">Accounts</a>
-          <a className={`admin-nav-item ${activePage === "operations" ? "admin-nav-item--active" : ""}`} href="/admin/operations">Operations</a>
+          <a className={`admin-nav-item ${activePage === "operations" ? "admin-nav-item--active" : ""}`} href="/admin/documents">Documents</a>
           <a className={`admin-nav-item ${activePage === "messages" ? "admin-nav-item--active" : ""}`} href="/admin/messages">Messages</a>
         </nav>
 
@@ -1952,8 +2024,8 @@ export function AdminWorkspace({
             <strong>Admin Dashboard</strong>
           </div>
           <div className="admin-utilitybar__chips">
-            <span>Live Supabase</span>
-            <span>{companies.length} companies</span>
+            <span>Live Database</span>
+            <span>{companies.length} clinics</span>
             <span>{samples.length} samples in view</span>
           </div>
         </div>
@@ -1976,7 +2048,7 @@ export function AdminWorkspace({
           <div className="admin-kpis">
             <article>
               <span>{companies.length}</span>
-              <p>Companies</p>
+              <p>Clinics</p>
             </article>
             <article>
               <span>{accounts.length}</span>
@@ -2000,48 +2072,62 @@ export function AdminWorkspace({
               <p className="eyebrow">Sample Data</p>
               <h2>Samples</h2>
             </div>
+            <a className="button button--primary button--compact" href="/admin/intake?intake_step=patient">
+              Add Sample
+            </a>
           </div>
 
-          <form className="admin-toolbar" method="get">
-            <input defaultValue={q} name="q" placeholder="Find by patient, sample number, package, or clinic" />
-            <select name="company_id" defaultValue={companyFilter}>
-              <option value="">All companies</option>
-              {companies.map((company) => (
-                <option key={company.id} value={company.id}>
-                  {company.name}
-                </option>
-              ))}
-            </select>
-            <select name="status" defaultValue={statusFilter}>
-              <option value="">All statuses</option>
-              <option value="draft">draft</option>
-              <option value="submitted">submitted</option>
-              <option value="mailed">mailed</option>
-              <option value="received">received</option>
-              <option value="ready_for_review">ready_for_review</option>
-              <option value="awaiting_documentation">awaiting_documentation</option>
-              <option value="rejected">rejected</option>
-            </select>
-            <select name="rejected" defaultValue={rejectedFilter}>
-              <option value="">All review states</option>
-              <option value="false">Active</option>
-              <option value="true">Rejected</option>
-            </select>
-            <button className="button button--secondary" type="submit">
-              Apply Filters
-            </button>
-          </form>
-
-          <div className="admin-record-list">
+          <form className="admin-sample-column-filters" method="get">
             <div className="admin-record-list__head">
               <span>Sample</span>
               <span>Patient</span>
               <span>Clinic</span>
               <span>Status</span>
               <span>Sex</span>
+              <span>Hart CADhs</span>
+              <span>Hart CVE</span>
               <span>Collected</span>
               <span>Received</span>
             </div>
+            <div className="admin-sample-filter-row">
+              <input name="admin_sample_number" defaultValue={adminSampleNumberFilter} placeholder="Filter sample" />
+              <input name="admin_patient" defaultValue={adminPatientFilter} placeholder="Filter patient" />
+              <input name="admin_clinic" defaultValue={adminClinicFilter} placeholder="Filter clinic" />
+              <select name="admin_status" defaultValue={adminStatusFilter}>
+                <option value="">All statuses</option>
+                <option value="draft">draft</option>
+                <option value="submitted">submitted</option>
+                <option value="mailed">mailed</option>
+                <option value="received">received</option>
+                <option value="ready_for_review">ready_for_review</option>
+                <option value="awaiting_documentation">awaiting_documentation</option>
+                <option value="rejected">rejected</option>
+              </select>
+              <input name="admin_sex" defaultValue={adminSexFilter} placeholder="Filter sex" />
+              <select name="admin_hart_cadhs" defaultValue={adminHartCadhsFilter}>
+                <option value="">All</option>
+                <option value="true">Yes</option>
+                <option value="false">No</option>
+              </select>
+              <select name="admin_hart_cve" defaultValue={adminHartCveFilter}>
+                <option value="">All</option>
+                <option value="true">Yes</option>
+                <option value="false">No</option>
+              </select>
+              <input name="admin_collected" type="date" defaultValue={adminCollectedFilter} />
+              <input name="admin_received" type="date" defaultValue={adminReceivedFilter} />
+            </div>
+            <div className="admin-sample-filter-actions">
+              <button className="button button--secondary button--compact" type="submit">
+                Apply Filters
+              </button>
+              <a className="button button--ghost button--compact" href="/admin/samples">
+                Clear
+              </a>
+            </div>
+          </form>
+
+          <div className="admin-record-list admin-record-list--samples">
             {samples.map((sample) => (
               <details className="admin-record" key={sample.id}>
                 <summary className="admin-record__summary">
@@ -2066,6 +2152,14 @@ export function AdminWorkspace({
                   <div>
                     <strong>{sample.sex ?? "Not set"}</strong>
                     <span>Sex</span>
+                  </div>
+                  <div>
+                    <strong>{sample.hart_cadhs ? "Yes" : "No"}</strong>
+                    <span>Hart CADhs</span>
+                  </div>
+                  <div>
+                    <strong>{sample.hart_cve ? "Yes" : "No"}</strong>
+                    <span>Hart CVE</span>
                   </div>
                   <div>
                     <strong>{formatDate(sample.collected_at)}</strong>
@@ -2982,155 +3076,95 @@ export function AdminWorkspace({
           )}
         </section>}
 
-        {activePage === "operations" && <section className="admin-panel" id="admin-records">
+        {activePage === "operations" && <section className="admin-panel" id="admin-documents">
           <div className="admin-panel__header">
             <div>
-              <p className="eyebrow">Operations</p>
-              <h2>Operations</h2>
+              <p className="eyebrow">Documents</p>
+              <h2>Patient and sample documents</h2>
             </div>
           </div>
 
+          <div className="create-grid">
+            <form action={uploadDocumentAction} className="panel form-panel">
+              <input type="hidden" name="redirect_to" value="/admin/documents" />
+              <p className="eyebrow">Document Upload</p>
+              <h3>Attach to patient and sample</h3>
+              {isUltimateAdmin && (
+                <div className="field">
+                  <label>Clinic</label>
+                  <select name="company_id" defaultValue="" required>
+                    <CompanyOptions companies={companies} />
+                  </select>
+                </div>
+              )}
+              <div className="field">
+                <label>Patient</label>
+                <input name="patient_id" list="admin-document-patient-options" placeholder="Type patient name" required />
+                <datalist id="admin-document-patient-options">
+                  <PatientLookupOptions patients={patients} />
+                </datalist>
+              </div>
+              <div className="field">
+                <label>Sample</label>
+                <input name="sample_id" list="admin-document-sample-options" placeholder="Type sample number" required />
+                <datalist id="admin-document-sample-options">
+                  {samples.map((sample) => (
+                    <option key={sample.id} value={`${sample.sample_number} | ${sample.id}`} />
+                  ))}
+                </datalist>
+              </div>
+              <div className="field">
+                <label>File</label>
+                <input name="document" type="file" accept=".pdf,image/png,image/jpeg" required />
+              </div>
+              <button className="button button--secondary" type="submit">
+                Upload Document
+              </button>
+            </form>
+
+            <article className="panel">
+              <p className="eyebrow">Document Rules</p>
+              <h3>Required links</h3>
+              <div className="list-grid">
+                <div className="list-row">
+                  <strong>Patient required</strong>
+                  <span>Every uploaded document must be tied to a patient.</span>
+                </div>
+                <div className="list-row">
+                  <strong>Sample required</strong>
+                  <span>The selected sample must belong to the selected patient.</span>
+                </div>
+              </div>
+            </article>
+          </div>
+
           <div className="data-grid">
-          <article className="panel">
-            <p className="eyebrow">Patients, Packages, Documents</p>
-            <h3>Records</h3>
+          <article className="panel panel--wide">
+            <p className="eyebrow">Document Directory</p>
+            <h3>Search patient or sample documents</h3>
+            <form className="search-form" method="get">
+              <input name="document_q" defaultValue={documentSearch} placeholder="Search patient, sample number, or file name" />
+              <button className="button button--secondary" type="submit">
+                Search
+              </button>
+              <a className="button button--ghost" href="/admin/documents">
+                Clear
+              </a>
+            </form>
             <div className="list-grid">
-              {patients.map((patient) => (
-                <form action={updatePatientAction} className="list-row" key={patient.id}>
-                  <input type="hidden" name="id" value={patient.id} />
-                  <input type="hidden" name="redirect_to" value="/admin/operations" />
-                  <strong>{patient.first_name} {patient.last_name}</strong>
-                  <div className="form-grid">
-                    <div className="field">
-                      <label>Clinic</label>
-                      <select name="company_id" defaultValue={patient.company_id}>
-                        {companies.map((company) => (
-                          <option key={company.id} value={company.id}>
-                            {company.name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="field">
-                      <label>First name</label>
-                      <input name="first_name" defaultValue={patient.first_name} />
-                    </div>
-                    <div className="field">
-                      <label>Last name</label>
-                      <input name="last_name" defaultValue={patient.last_name} />
-                    </div>
-                    <div className="field">
-                      <label>DOB</label>
-                      <input name="date_of_birth" type="date" defaultValue={patient.date_of_birth} />
-                    </div>
-                    <div className="field">
-                      <label>Street address</label>
-                      <input name="address_line_1" defaultValue={patient.address_line_1 ?? ""} />
-                    </div>
-                    <div className="field">
-                      <label>City</label>
-                      <input name="city" defaultValue={patient.city ?? ""} />
-                    </div>
-                    <div className="field">
-                      <label>State</label>
-                      <input name="state" defaultValue={patient.state ?? ""} maxLength={2} />
-                    </div>
-                    <div className="field">
-                      <label>Zip code</label>
-                      <input name="postal_code" defaultValue={patient.postal_code ?? ""} />
-                    </div>
-                    <div className="field">
-                      <label>Phone number</label>
-                      <input name="phone_number" defaultValue={patient.phone_number ?? ""} />
-                    </div>
-                    <div className="field">
-                      <label>Email address</label>
-                      <input name="email_address" type="email" defaultValue={patient.email_address ?? ""} />
-                    </div>
-                    <div className="field">
-                      <label>Race / ethnicity</label>
-                      <input name="race_ethnicity" defaultValue={patient.race_ethnicity ?? ""} />
-                    </div>
-                    <div className="field">
-                      <label>Weight (lbs)</label>
-                      <input
-                        name="weight_lbs"
-                        type="number"
-                        step="0.01"
-                        defaultValue={patient.weight_lbs ?? ""}
-                      />
-                    </div>
-                    <div className="field">
-                      <label>Height (inches)</label>
-                      <input
-                        name="height_inches"
-                        type="number"
-                        step="0.01"
-                        defaultValue={patient.height_inches ?? ""}
-                      />
-                    </div>
-                  </div>
-                  <div className="checkbox-row">
-                    <label>
-                      <input
-                        name="angioplasty_or_stent"
-                        type="checkbox"
-                        defaultChecked={patient.angioplasty_or_stent}
-                      />
-                      Angioplasty or Stent
-                    </label>
-                    <label>
-                      <input name="cabg" type="checkbox" defaultChecked={patient.cabg} />
-                      Coronary Artery Bypass Graft (CABG)
-                    </label>
-                  </div>
-                  <button className="button button--secondary" type="submit">
-                    Save Patient
-                  </button>
-                </form>
-              ))}
-
-              {packages.map((entry) => (
-                <form action={updatePackageAction} className="list-row" key={entry.id}>
-                  <input type="hidden" name="id" value={entry.id} />
-                  <input type="hidden" name="redirect_to" value="/admin/operations" />
-                  <strong>{entry.package_id}</strong>
-                  <div className="form-grid">
-                    <div className="field">
-                      <label>Clinic</label>
-                      <select name="company_id" defaultValue={entry.company_id}>
-                        {companies.map((company) => (
-                          <option key={company.id} value={company.id}>
-                            {company.name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="field">
-                      <label>Package ID</label>
-                      <input name="package_id" defaultValue={entry.package_id} />
-                    </div>
-                    <div className="field">
-                      <label>Mailed</label>
-                      <input name="mailed_at" type="datetime-local" defaultValue={toDateTimeLocal(entry.mailed_at)} />
-                    </div>
-                    <div className="field">
-                      <label>Received</label>
-                      <input name="received_at" type="datetime-local" defaultValue={toDateTimeLocal(entry.received_at)} />
-                    </div>
-                  </div>
-                  <button className="button button--secondary" type="submit">
-                    Save Package
-                  </button>
-                </form>
-              ))}
-
               {documents.map((document) => (
                 <div className="list-row" key={document.id}>
                   <strong>{document.original_filename}</strong>
-                  <span>{document.storage_path}</span>
+                  <span>
+                    {[document.patient_first_name, document.patient_last_name].filter(Boolean).join(" ")}
+                    {" | "}
+                    {document.sample_number}
+                    {" | "}
+                    {document.company_name}
+                  </span>
                 </div>
               ))}
+              {documents.length === 0 && <div className="empty-state">No documents found.</div>}
             </div>
           </article>
           </div>
@@ -3142,7 +3176,7 @@ export function AdminWorkspace({
               <p className="eyebrow">Customer Messages</p>
               <h2>Live chat inbox</h2>
             </div>
-            <span className="admin-panel__caption">UI preview for future Supabase realtime messaging.</span>
+              <span className="admin-panel__caption">UI preview for future realtime messaging.</span>
           </div>
 
           <div className="admin-chat-layout">
@@ -3342,8 +3376,8 @@ export default async function Home({ searchParams }: { searchParams: SearchParam
       .order("created_at", { ascending: false })
       .limit(6),
     supabase
-      .from("patient_documents")
-      .select("id, company_id, patient_id, sample_id, original_filename, storage_path")
+      .from("document_directory")
+      .select("id, company_id, company_name, patient_id, patient_first_name, patient_last_name, sample_id, sample_number, original_filename, storage_path, created_at")
       .order("created_at", { ascending: false })
       .limit(6),
   ]);

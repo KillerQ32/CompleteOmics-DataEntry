@@ -134,14 +134,14 @@ function resolveCompanyId(profile: SessionProfile, formData: FormData) {
     const companyId = parseLookupValue(optionalValue(formData, "company_id"));
 
     if (!companyId) {
-      redirectWith("error", "Choose a company for this admin action.");
+      redirectWith("error", "Choose a clinic for this admin action.");
     }
 
     return companyId;
   }
 
   if (!profile.company_id) {
-    redirectWith("error", "Your user profile is missing a company assignment.");
+    redirectWith("error", "Your user profile is missing a clinic assignment.");
   }
 
   return profile.company_id;
@@ -150,7 +150,8 @@ function resolveCompanyId(profile: SessionProfile, formData: FormData) {
 export async function signInAction(formData: FormData) {
   const supabase = await createSupabaseServerClient();
   const redirectPath = getRedirectPath(formData);
-  const { error } = await supabase.auth.signInWithPassword({
+  const loginScope = getValue(formData, "login_scope") || "customer";
+  const { data, error } = await supabase.auth.signInWithPassword({
     email: getValue(formData, "email"),
     password: getValue(formData, "password"),
   });
@@ -159,8 +160,42 @@ export async function signInAction(formData: FormData) {
     redirectWithPath(redirectPath, "error", error.message);
   }
 
+  const userId = data.user?.id;
+
+  if (!userId) {
+    redirectWithPath(redirectPath, "error", "Sign in did not return a user record.");
+  }
+
+  const { data: profile, error: profileError } = await supabase
+    .from("user_profiles")
+    .select("role, account_status")
+    .eq("id", userId)
+    .single();
+
+  if (profileError || !profile) {
+    await supabase.auth.signOut();
+    redirectWithPath(redirectPath, "error", profileError?.message ?? "Your user profile could not be loaded.");
+  }
+
+  const isStaff = profile.role === "admin" || profile.role === "clinic_admin";
+
+  if (loginScope === "admin" && !isStaff) {
+    await supabase.auth.signOut();
+    redirectWithPath("/admin", "error", "Use the customer login for customer accounts.");
+  }
+
+  if (loginScope !== "admin" && isStaff) {
+    await supabase.auth.signOut();
+    redirectWithPath("/", "error", "Use the admin login for admin accounts.");
+  }
+
+  if (loginScope !== "admin" && profile.account_status !== "approved") {
+    revalidatePath("/");
+    redirectWithPath("/", "message", "Signed in. Your account is waiting for approval.");
+  }
+
   revalidatePath("/");
-  redirectWithPath(redirectPath, "message", "Signed in successfully.");
+  redirect(redirectPath);
 }
 
 export async function signUpAction(formData: FormData) {
@@ -460,7 +495,7 @@ export async function createCompanyAction(formData: FormData) {
   }
 
   revalidatePath("/");
-  redirectWithPath(redirectPath, "message", "Company created.");
+  redirectWithPath(redirectPath, "message", "Clinic created.");
 }
 
 export async function updateCompanyAction(formData: FormData) {
@@ -488,7 +523,7 @@ export async function updateCompanyAction(formData: FormData) {
   }
 
   revalidatePath("/");
-  redirectWithPath(redirectPath, "message", "Company updated.");
+  redirectWithPath(redirectPath, "message", "Clinic updated.");
 }
 
 export async function updateUserProfileAction(formData: FormData) {
@@ -897,11 +932,33 @@ export async function uploadDocumentAction(formData: FormData) {
   const companyId = resolveCompanyId(profile, formData);
   const patientId = parseLookupValue(optionalValue(formData, "patient_id")) ?? optionalValue(formData, "patient_id");
   const sampleId = parseLookupValue(optionalValue(formData, "sample_id")) ?? optionalValue(formData, "sample_id");
-  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const cleanName = fileToUpload.name.replace(/[^a-zA-Z0-9._-]/g, "-");
-  const storagePath = `${companyId}/${patientId ?? "unassigned"}/${timestamp}-${cleanName}`;
+
+  if (!patientId || !sampleId) {
+    redirectWithPath(redirectPath, "error", "Choose both a patient and a sample before uploading a document.");
+  }
 
   const client = profile.role === "admin" ? createSupabaseAdminClient() : await createSupabaseServerClient();
+  const { data: sample, error: sampleError } = await client
+    .from("samples")
+    .select("id, patient_id, company_id")
+    .eq("id", sampleId)
+    .single();
+
+  if (sampleError || !sample) {
+    redirectWithPath(redirectPath, "error", sampleError?.message ?? "Selected sample could not be found.");
+  }
+
+  if (sample.patient_id !== patientId) {
+    redirectWithPath(redirectPath, "error", "Selected sample is not tied to the selected patient.");
+  }
+
+  if (sample.company_id !== companyId) {
+    redirectWithPath(redirectPath, "error", "Selected sample is not tied to the selected clinic.");
+  }
+
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const cleanName = fileToUpload.name.replace(/[^a-zA-Z0-9._-]/g, "-");
+  const storagePath = `${companyId}/${patientId}/${sampleId}/${timestamp}-${cleanName}`;
 
   const { error: uploadError } = await client.storage
     .from("patient-documents")
