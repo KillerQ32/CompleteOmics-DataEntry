@@ -1,11 +1,14 @@
 import {
+  approveClinicRequestAction,
   createCompanyAction,
   createCustomerIntakeAction,
   createPackageAction,
   createPatientAction,
+  denyClinicRequestAction,
   signInAction,
   signOutAction,
   signUpAction,
+  updateAccountApprovalAction,
   updateCustomerAccountAction,
   updateCompanyAction,
   updatePackageAction,
@@ -22,9 +25,9 @@ export const dynamic = "force-dynamic";
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 
-type CustomerView = "home" | "samples" | "intake" | "operations" | "account" | "contact";
+type CustomerView = "home" | "samples" | "intake" | "operations" | "account" | "contact" | "chat";
 type IntakeStep = "patient" | "sample" | "files" | "package" | "review";
-export type AdminPage = "overview" | "samples" | "intake" | "clinics" | "accounts" | "operations";
+export type AdminPage = "overview" | "samples" | "intake" | "clinics" | "accounts" | "operations" | "messages";
 
 type CompanyRow = {
   id: string;
@@ -41,8 +44,9 @@ type CompanyRow = {
 type ProfileRow = {
   first_name: string | null;
   last_name: string | null;
-  role: "admin" | "customer";
+  role: "admin" | "clinic_admin" | "customer";
   company_id: string | null;
+  account_status: string;
 };
 
 type SampleRow = {
@@ -163,9 +167,28 @@ type AdminUserRow = {
   id: string;
   first_name: string | null;
   last_name: string | null;
-  role: "admin" | "customer";
+  role: "admin" | "clinic_admin" | "customer";
+  account_status: string;
   company_id: string | null;
   company_name: string | null;
+  created_at: string;
+};
+
+type ClinicRequestRow = {
+  id: string;
+  clinic_name: string;
+  address_line_1: string;
+  city: string;
+  state: string;
+  postal_code: string;
+  contact_email: string;
+  contact_phone: string;
+  fax_number: string | null;
+  requester_first_name: string;
+  requester_last_name: string;
+  requester_email: string;
+  notes: string | null;
+  status: string;
   created_at: string;
 };
 
@@ -185,7 +208,8 @@ function normalizeCustomerView(value: string): CustomerView {
     value === "intake" ||
     value === "operations" ||
     value === "account" ||
-    value === "contact"
+    value === "contact" ||
+    value === "chat"
   ) {
     return value;
   }
@@ -453,10 +477,53 @@ async function AuthLanding({ error, message }: { error: string; message: string 
             <a className="customer-login-panel__link" href="/signup">
               Create customer account
             </a>
+            <a className="customer-login-panel__link" href="/signup?request_clinic=true">
+              Request to add a clinic
+            </a>
             <a className="customer-login-panel__link" href="/admin">
               Admin login
             </a>
           </div>
+        </section>
+      </section>
+    </main>
+  );
+}
+
+function PendingApproval({ userEmail, profile }: { userEmail: string; profile: ProfileRow | null }) {
+  const denied = profile?.account_status === "denied";
+
+  return (
+    <main className="customer-login-page">
+      <div className="customer-login-bg">
+        <span className="customer-login-bg__cell customer-login-bg__cell--one" />
+        <span className="customer-login-bg__cell customer-login-bg__cell--two" />
+        <span className="customer-login-bg__cell customer-login-bg__cell--three" />
+      </div>
+
+      <section className="customer-login-shell">
+        <aside className="customer-login-brand">
+          <div className="customer-login-brand__logo">
+            <img className="brand-logo brand-logo--full" src="/completeomics-logo.png" alt="Complete Omics" />
+          </div>
+          <h1>{denied ? "Access Denied" : "Approval Pending"}</h1>
+        </aside>
+
+        <section className="customer-login-panel">
+          <div className="customer-login-panel__header">
+            <h2>{denied ? "Account not approved" : "Waiting for clinic approval"}</h2>
+          </div>
+          <p className="signup-helper-text">
+            {denied
+              ? "This customer account was denied by an admin. Contact Complete Omics if this looks incorrect."
+              : "Your account was created, but a clinic admin or Complete Omics admin must approve it before you can use the portal."}
+          </p>
+          <p className="signup-helper-text">Signed in as {userEmail}</p>
+          <form action={signOutAction}>
+            <button className="button button--primary" type="submit">
+              Sign Out
+            </button>
+          </form>
         </section>
       </section>
     </main>
@@ -662,6 +729,7 @@ function CustomerWorkspace({
           <CustomerShellLink href="/?customer_view=operations" label="File Uploads" active={customerView === "operations"} />
           <CustomerShellLink href="/?customer_view=account" label="Account" active={customerView === "account"} />
           <CustomerShellLink href="/?customer_view=contact" label="Contact Us" active={customerView === "contact"} />
+          <CustomerShellLink href="/?customer_view=chat" label="Live Chat" active={customerView === "chat"} />
         </nav>
         <form action={signOutAction}>
           <button className="button button--secondary" type="submit">
@@ -1412,7 +1480,6 @@ function CustomerWorkspace({
                       <option>Customer portal support</option>
                       <option>Ask a question</option>
                       <option>Request a quote</option>
-                      <option>Apply for a job</option>
                       <option>Other</option>
                     </select>
                   </div>
@@ -1436,7 +1503,7 @@ function CustomerWorkspace({
                   <textarea
                     name="message"
                     rows={6}
-                    placeholder="Ask a question / request a quote / apply for a job / or message us about anything."
+                    placeholder="Ask a question, request support, or message the Complete Omics team."
                   />
                 </div>
                 <a
@@ -1472,6 +1539,44 @@ function CustomerWorkspace({
                 </article>
               </aside>
             </div>
+          </section>
+        )}
+
+        {customerView === "chat" && (
+          <section className="admin-panel customer-panel" id="customer-live-chat">
+            <div className="admin-panel__header">
+              <div>
+                <p className="eyebrow">Live Chat</p>
+                <h2>Message Complete Omics Admin</h2>
+              </div>
+              <span className="admin-panel__caption">UI preview for future Supabase realtime messaging.</span>
+            </div>
+
+            <section className="portal-chat-panel portal-chat-panel--standalone" aria-label="Portal live chat preview">
+              <div className="portal-chat-panel__header">
+                <div>
+                  <p className="eyebrow">Conversation</p>
+                  <h3>{company?.name ?? "Clinic"} Support Chat</h3>
+                </div>
+                <span>UI Preview</span>
+              </div>
+              <div className="portal-chat-thread">
+                <div className="portal-chat-message portal-chat-message--admin">
+                  <strong>Complete Omics Admin</strong>
+                  <p>Thanks for reaching out. Once realtime messaging is connected, admin replies will appear here.</p>
+                </div>
+                <div className="portal-chat-message portal-chat-message--customer">
+                  <strong>{profile?.first_name ?? "Customer"}</strong>
+                  <p>Your message will start a secure portal conversation with the admin team.</p>
+                </div>
+              </div>
+              <div className="portal-chat-compose">
+                <input placeholder="Type a message to admin" />
+                <button className="button button--primary" type="button">
+                  Send Message
+                </button>
+              </div>
+            </section>
           </section>
         )}
       </div>
@@ -1540,17 +1645,19 @@ export async function loadAdminWorkspaceData(
 
   const { data: profileData } = await supabase
     .from("user_profiles")
-    .select("first_name, last_name, role, company_id")
+    .select("first_name, last_name, role, company_id, account_status")
     .eq("id", user.id)
     .single();
 
   const profile = (profileData ?? null) as ProfileRow | null;
 
-  if (profile?.role !== "admin") {
+  if (profile?.role !== "admin" && profile?.role !== "clinic_admin") {
     redirect("/");
   }
 
   const admin = createSupabaseAdminClient();
+  const isUltimateAdmin = profile.role === "admin";
+  const staffCompanyId = profile.company_id;
   let sampleQuery = admin
     .from("admin_sample_directory")
     .select(
@@ -1566,7 +1673,9 @@ export async function loadAdminWorkspaceData(
     );
   }
 
-  if (companyFilter) {
+  if (!isUltimateAdmin && staffCompanyId) {
+    sampleQuery = sampleQuery.eq("company_id", staffCompanyId);
+  } else if (companyFilter) {
     sampleQuery = sampleQuery.eq("company_id", companyFilter);
   }
 
@@ -1578,30 +1687,48 @@ export async function loadAdminWorkspaceData(
     sampleQuery = sampleQuery.eq("rejected", rejectedFilter === "true");
   }
 
-  const [companiesResult, accountsResult, samplesResult, patientsResult, packagesResult, documentsResult, authUsersResult] =
+  const [
+    companiesResult,
+    clinicRequestsResult,
+    accountsResult,
+    samplesResult,
+    patientsResult,
+    packagesResult,
+    documentsResult,
+    authUsersResult,
+  ] =
     await Promise.all([
       admin
         .from("companies")
         .select("id, name, address_line_1, city, state, postal_code, contact_email, contact_phone, fax_number")
+        .match(!isUltimateAdmin && staffCompanyId ? { id: staffCompanyId } : {})
         .order("name"),
       admin
+        .from("clinic_requests")
+        .select("id, clinic_name, address_line_1, city, state, postal_code, contact_email, contact_phone, fax_number, requester_first_name, requester_last_name, requester_email, notes, status, created_at")
+        .order("created_at", { ascending: false }),
+      admin
         .from("admin_user_directory")
-        .select("id, first_name, last_name, role, company_id, company_name, created_at")
+        .select("id, first_name, last_name, role, account_status, company_id, company_name, created_at")
+        .match(!isUltimateAdmin && staffCompanyId ? { company_id: staffCompanyId } : {})
         .order("created_at", { ascending: false }),
       sampleQuery,
       admin
         .from("patients")
         .select("id, company_id, first_name, last_name, date_of_birth, address_line_1, city, state, postal_code, phone_number, email_address, race_ethnicity, weight_lbs, height_inches, angioplasty_or_stent, cabg, created_at")
+        .match(!isUltimateAdmin && staffCompanyId ? { company_id: staffCompanyId } : {})
         .order("created_at", { ascending: false })
         .limit(10),
       admin
         .from("fedex_packages")
         .select("id, company_id, package_id, mailed_at, received_at, created_at")
+        .match(!isUltimateAdmin && staffCompanyId ? { company_id: staffCompanyId } : {})
         .order("created_at", { ascending: false })
         .limit(10),
       admin
         .from("patient_documents")
         .select("id, company_id, patient_id, sample_id, original_filename, storage_path")
+        .match(!isUltimateAdmin && staffCompanyId ? { company_id: staffCompanyId } : {})
         .order("created_at", { ascending: false })
         .limit(10),
       admin.auth.admin.listUsers({ page: 1, perPage: 200 }),
@@ -1615,7 +1742,10 @@ export async function loadAdminWorkspaceData(
     userEmail: user.email ?? "Unknown email",
     profile,
     companies: (companiesResult.data ?? []) as CompanyRow[],
-    accounts: (accountsResult.data ?? []) as AdminUserRow[],
+    clinicRequests: (clinicRequestsResult.data ?? []) as ClinicRequestRow[],
+    accounts: ((accountsResult.data ?? []) as AdminUserRow[]).filter((account) =>
+      isUltimateAdmin ? true : account.role === "customer",
+    ),
     samples: (samplesResult.data ?? []) as AdminSampleRow[],
     patients: (patientsResult.data ?? []) as PatientRow[],
     packages: (packagesResult.data ?? []) as PackageRow[],
@@ -1626,6 +1756,7 @@ export async function loadAdminWorkspaceData(
     companyFilter,
     statusFilter,
     rejectedFilter,
+    isUltimateAdmin,
     userEmailById,
     intakeStep,
     adminIntakeCompanyId,
@@ -1639,6 +1770,7 @@ export function AdminWorkspace({
   userEmail,
   profile,
   companies,
+  clinicRequests,
   accounts,
   samples,
   patients,
@@ -1650,6 +1782,7 @@ export function AdminWorkspace({
   companyFilter,
   statusFilter,
   rejectedFilter,
+  isUltimateAdmin,
   userEmailById,
   intakeStep,
   adminIntakeCompanyId,
@@ -1661,6 +1794,7 @@ export function AdminWorkspace({
   userEmail: string;
   profile: ProfileRow | null;
   companies: CompanyRow[];
+  clinicRequests: ClinicRequestRow[];
   accounts: AdminUserRow[];
   samples: AdminSampleRow[];
   patients: PatientRow[];
@@ -1672,6 +1806,7 @@ export function AdminWorkspace({
   companyFilter: string;
   statusFilter: string;
   rejectedFilter: string;
+  isUltimateAdmin: boolean;
   userEmailById: Map<string, string>;
   intakeStep: IntakeStep;
   adminIntakeCompanyId: string;
@@ -1796,6 +1931,7 @@ export function AdminWorkspace({
           <a className={`admin-nav-item ${activePage === "clinics" ? "admin-nav-item--active" : ""}`} href="/admin/clinics">Clinics</a>
           <a className={`admin-nav-item ${activePage === "accounts" ? "admin-nav-item--active" : ""}`} href="/admin/accounts">Accounts</a>
           <a className={`admin-nav-item ${activePage === "operations" ? "admin-nav-item--active" : ""}`} href="/admin/operations">Operations</a>
+          <a className={`admin-nav-item ${activePage === "messages" ? "admin-nav-item--active" : ""}`} href="/admin/messages">Messages</a>
         </nav>
 
         <div className="admin-sidebar__meta">
@@ -2565,6 +2701,7 @@ export function AdminWorkspace({
                 <span>Name</span>
                 <span>Role</span>
                 <span>Clinic</span>
+                <span>Status</span>
                 <span>Created</span>
                 <span>Edit</span>
               </div>
@@ -2582,7 +2719,7 @@ export function AdminWorkspace({
                       <span>User profile</span>
                     </div>
                     <div>
-                      <strong>{account.role}</strong>
+                      <strong>{account.role === "clinic_admin" ? "clinic admin" : account.role}</strong>
                       <span>Access level</span>
                     </div>
                     <div>
@@ -2590,15 +2727,20 @@ export function AdminWorkspace({
                       <span>{account.role === "admin" ? "No clinic assignment" : "Clinic scope"}</span>
                     </div>
                     <div>
+                      <strong>{account.account_status}</strong>
+                      <span>Approval</span>
+                    </div>
+                    <div>
                       <strong>{formatDate(account.created_at)}</strong>
                       <span>Created</span>
                     </div>
                     <div className="admin-record__actions">
-                      <strong>{account.role === "admin" ? "Admin" : "Customer"}</strong>
-                      <span className="admin-record__toggle">Edit</span>
+                      <strong>{account.role === "admin" ? "Admin" : account.role === "clinic_admin" ? "Clinic Admin" : "Customer"}</strong>
+                      <span className="admin-record__toggle">{isUltimateAdmin ? "Edit" : "Review"}</span>
                     </div>
                   </summary>
 
+                  {isUltimateAdmin ? (
                   <form action={updateUserProfileAction} className="admin-record__details">
                     <input type="hidden" name="id" value={account.id} />
                     <input type="hidden" name="redirect_to" value="/admin/accounts" />
@@ -2615,7 +2757,16 @@ export function AdminWorkspace({
                       <label>Role</label>
                       <select name="role" defaultValue={account.role}>
                         <option value="customer">customer</option>
+                        <option value="clinic_admin">clinic_admin</option>
                         <option value="admin">admin</option>
+                      </select>
+                    </div>
+                    <div className="field">
+                      <label>Approval status</label>
+                      <select name="account_status" defaultValue={account.account_status}>
+                        <option value="pending">pending</option>
+                        <option value="approved">approved</option>
+                        <option value="denied">denied</option>
                       </select>
                     </div>
                     <div className="field">
@@ -2625,7 +2776,9 @@ export function AdminWorkspace({
                         defaultValue={account.role === "admin" ? "" : account.company_id ?? ""}
                         disabled={account.role === "admin"}
                       >
-                        <option value="">Unassigned</option>
+                        <option value="" disabled>
+                          Choose clinic
+                        </option>
                         {companies.map((company) => (
                           <option key={company.id} value={company.id}>
                             {company.name}
@@ -2643,6 +2796,27 @@ export function AdminWorkspace({
                       </button>
                     </div>
                   </form>
+                  ) : (
+                    <form action={updateAccountApprovalAction} className="admin-record__details">
+                      <input type="hidden" name="id" value={account.id} />
+                      <input type="hidden" name="redirect_to" value="/admin/accounts" />
+                      <div className="form-grid form-grid--compact">
+                        <div className="field">
+                          <label>Approval status</label>
+                          <select name="account_status" defaultValue={account.account_status}>
+                            <option value="pending">pending</option>
+                            <option value="approved">approved</option>
+                            <option value="denied">denied</option>
+                          </select>
+                        </div>
+                      </div>
+                      <div className="admin-record__details-actions">
+                        <button className="button button--primary button--compact" type="submit">
+                          Save Approval
+                        </button>
+                      </div>
+                    </form>
+                  )}
                 </details>
               ))}
               {accounts.length === 0 && <div className="empty-state">No accounts found.</div>}
@@ -2659,7 +2833,67 @@ export function AdminWorkspace({
             </div>
           </div>
 
-          <div className="admin-record-list admin-record-list--clinics">
+          {isUltimateAdmin && <article className="panel clinic-requests-panel">
+            <div className="panel__header">
+              <div>
+                <p className="eyebrow">Clinic Requests</p>
+                <h3>Pending clinic additions</h3>
+              </div>
+              <span>{clinicRequests.length} requests</span>
+            </div>
+            <div className="list-grid">
+              {clinicRequests.map((request) => (
+                <div className="list-row clinic-request-row" key={request.id}>
+                  <div>
+                    <strong>{request.clinic_name}</strong>
+                    <span>
+                      {[request.address_line_1, request.city, request.state, request.postal_code]
+                        .filter(Boolean)
+                        .join(", ")}
+                    </span>
+                  </div>
+                  <div>
+                    <strong>{request.contact_email}</strong>
+                    <span>{request.contact_phone}</span>
+                    <span>{request.fax_number ? `Fax ${request.fax_number}` : "Fax not provided"}</span>
+                  </div>
+                  <div>
+                    <strong>{request.requester_first_name} {request.requester_last_name}</strong>
+                    <span>{request.requester_email}</span>
+                    <span>{request.status}</span>
+                  </div>
+                  {request.notes && <p>{request.notes}</p>}
+                  <div className="clinic-request-row__actions">
+                    <form action={approveClinicRequestAction}>
+                      <input type="hidden" name="id" value={request.id} />
+                      <input type="hidden" name="redirect_to" value="/admin/clinics" />
+                      <button
+                        className="button button--primary button--compact"
+                        type="submit"
+                        disabled={request.status === "approved"}
+                      >
+                        Approve and Create Clinic Admin
+                      </button>
+                    </form>
+                    <form action={denyClinicRequestAction}>
+                      <input type="hidden" name="id" value={request.id} />
+                      <input type="hidden" name="redirect_to" value="/admin/clinics" />
+                      <button
+                        className="button button--secondary button--compact"
+                        type="submit"
+                        disabled={request.status === "approved" || request.status === "rejected"}
+                      >
+                        Deny
+                      </button>
+                    </form>
+                  </div>
+                </div>
+              ))}
+              {clinicRequests.length === 0 && <div className="empty-state">No clinic requests yet.</div>}
+            </div>
+          </article>}
+
+          {isUltimateAdmin ? <div className="admin-record-list admin-record-list--clinics">
             <div className="admin-record-list__head">
               <span>Clinic</span>
               <span>Location</span>
@@ -2743,7 +2977,9 @@ export function AdminWorkspace({
               </details>
             ))}
             {companies.length === 0 && <div className="empty-state">No clinics found.</div>}
-          </div>
+          </div> : (
+            <div className="empty-state">Clinic admins can manage account approvals from the Accounts page.</div>
+          )}
         </section>}
 
         {activePage === "operations" && <section className="admin-panel" id="admin-records">
@@ -2899,6 +3135,64 @@ export function AdminWorkspace({
           </article>
           </div>
         </section>}
+
+        {activePage === "messages" && <section className="admin-panel" id="admin-messages">
+          <div className="admin-panel__header">
+            <div>
+              <p className="eyebrow">Customer Messages</p>
+              <h2>Live chat inbox</h2>
+            </div>
+            <span className="admin-panel__caption">UI preview for future Supabase realtime messaging.</span>
+          </div>
+
+          <div className="admin-chat-layout">
+            <aside className="admin-chat-inbox">
+              <article className="admin-chat-thread-card admin-chat-thread-card--active">
+                <span>New</span>
+                <strong>{companies[0]?.name ?? "Clinic customer"}</strong>
+                <p>Question about sample intake submission.</p>
+              </article>
+              <article className="admin-chat-thread-card">
+                <span>Open</span>
+                <strong>{companies[1]?.name ?? "Customer account"}</strong>
+                <p>Needs help uploading supporting documents.</p>
+              </article>
+              <article className="admin-chat-thread-card">
+                <span>Resolved</span>
+                <strong>{companies[2]?.name ?? "Clinic support"}</strong>
+                <p>FedEx package was attached to the wrong sample.</p>
+              </article>
+            </aside>
+
+            <section className="admin-chat-window">
+              <div className="admin-chat-window__header">
+                <div>
+                  <p className="eyebrow">Active Conversation</p>
+                  <h3>{companies[0]?.name ?? "Clinic customer"}</h3>
+                </div>
+                <span>Realtime not connected</span>
+              </div>
+
+              <div className="portal-chat-thread">
+                <div className="portal-chat-message portal-chat-message--customer">
+                  <strong>Customer</strong>
+                  <p>Hi, I submitted a sample and wanted to confirm the files went through.</p>
+                </div>
+                <div className="portal-chat-message portal-chat-message--admin">
+                  <strong>Admin</strong>
+                  <p>Thanks for checking. This admin chat UI is ready for the future message table integration.</p>
+                </div>
+              </div>
+
+              <div className="portal-chat-compose">
+                <input placeholder="Type an admin response" />
+                <button className="button button--primary" type="button">
+                  Send Reply
+                </button>
+              </div>
+            </section>
+          </div>
+        </section>}
       </div>
     </main>
   );
@@ -2970,14 +3264,18 @@ export default async function Home({ searchParams }: { searchParams: SearchParam
 
   const { data: profileData } = await supabase
     .from("user_profiles")
-    .select("first_name, last_name, role, company_id")
+    .select("first_name, last_name, role, company_id, account_status")
     .eq("id", user.id)
     .single();
 
   const profile = (profileData ?? null) as ProfileRow | null;
 
-  if (profile?.role === "admin") {
+  if (profile?.role === "admin" || profile?.role === "clinic_admin") {
     redirect("/admin/overview");
+  }
+
+  if (profile?.role === "customer" && profile.account_status !== "approved") {
+    return <PendingApproval userEmail={user.email ?? "Unknown email"} profile={profile} />;
   }
 
   const companyPromise = profile?.company_id

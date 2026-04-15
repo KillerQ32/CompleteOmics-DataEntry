@@ -7,7 +7,7 @@ import { createSupabaseServerClient } from "../lib/supabase/server";
 
 type SessionProfile = {
   id: string;
-  role: "admin" | "customer";
+  role: "admin" | "clinic_admin" | "customer";
   company_id: string | null;
 };
 
@@ -119,6 +119,16 @@ async function requireAdminSession() {
   return session;
 }
 
+async function requireStaffSession() {
+  const session = await requireSessionProfile();
+
+  if (session.profile.role !== "admin" && session.profile.role !== "clinic_admin") {
+    redirectWith("error", "Admin access is required for that action.");
+  }
+
+  return session;
+}
+
 function resolveCompanyId(profile: SessionProfile, formData: FormData) {
   if (profile.role === "admin") {
     const companyId = parseLookupValue(optionalValue(formData, "company_id"));
@@ -162,6 +172,20 @@ export async function signUpAction(formData: FormData) {
   const lastName = getValue(formData, "last_name");
   const companyId = getValue(formData, "company_id");
 
+  if (!companyId) {
+    redirectWithPath(redirectPath, "error", "Choose an approved clinic before creating a customer account.");
+  }
+
+  const { data: companyExists, error: companyError } = await admin
+    .from("companies")
+    .select("id")
+    .eq("id", companyId)
+    .maybeSingle();
+
+  if (companyError || !companyExists) {
+    redirectWithPath(redirectPath, "error", companyError?.message ?? "Choose an approved clinic before creating a customer account.");
+  }
+
   const { data, error } = await supabase.auth.signUp({
     email: getValue(formData, "email"),
     password: getValue(formData, "password"),
@@ -189,6 +213,7 @@ export async function signUpAction(formData: FormData) {
     first_name: firstName,
     last_name: lastName,
     role: "customer",
+    account_status: "pending",
   });
 
   if (profileError) {
@@ -196,7 +221,146 @@ export async function signUpAction(formData: FormData) {
   }
 
   revalidatePath("/");
-  redirectWithPath(redirectPath, "message", "Account created. You can now use the portal.");
+  redirectWithPath(redirectPath, "message", "Account created and sent for clinic approval.");
+}
+
+export async function requestClinicAction(formData: FormData) {
+  const admin = createSupabaseAdminClient();
+  const redirectPath = getRedirectPath(formData, "/signup?request_clinic=true");
+
+  const { error } = await admin.from("clinic_requests").insert({
+    clinic_name: getValue(formData, "clinic_name"),
+    address_line_1: getValue(formData, "address_line_1"),
+    city: getValue(formData, "city"),
+    state: getValue(formData, "state"),
+    postal_code: getValue(formData, "postal_code"),
+    contact_email: getValue(formData, "contact_email"),
+    contact_phone: getValue(formData, "contact_phone"),
+    fax_number: optionalValue(formData, "fax_number"),
+    requester_first_name: getValue(formData, "requester_first_name"),
+    requester_last_name: getValue(formData, "requester_last_name"),
+    requester_email: getValue(formData, "requester_email"),
+    notes: optionalValue(formData, "notes"),
+  });
+
+  if (error) {
+    redirectWithPath(redirectPath, "error", error.message);
+  }
+
+  revalidatePath("/admin/clinics");
+  redirectWithPath(redirectPath, "message", "Clinic request submitted. Complete Omics will review it before account creation.");
+}
+
+export async function approveClinicRequestAction(formData: FormData) {
+  await requireAdminSession();
+  const admin = createSupabaseAdminClient();
+  const requestId = getValue(formData, "id");
+  const redirectPath = getRedirectPath(formData, "/admin/clinics");
+
+  const { data: request, error: requestError } = await admin
+    .from("clinic_requests")
+    .select(
+      "id, clinic_name, address_line_1, city, state, postal_code, contact_email, contact_phone, fax_number, requester_first_name, requester_last_name, requester_email",
+    )
+    .eq("id", requestId)
+    .single();
+
+  if (requestError || !request) {
+    redirectWithPath(redirectPath, "error", requestError?.message ?? "Clinic request could not be found.");
+  }
+
+  const { data: company, error: companyError } = await admin
+    .from("companies")
+    .insert({
+      name: request.clinic_name,
+      address_line_1: request.address_line_1,
+      city: request.city,
+      state: request.state,
+      postal_code: request.postal_code,
+      contact_email: request.contact_email,
+      contact_phone: request.contact_phone,
+      fax_number: request.fax_number,
+    })
+    .select("id")
+    .single();
+
+  if (companyError || !company) {
+    redirectWithPath(redirectPath, "error", companyError?.message ?? "Clinic could not be created.");
+  }
+
+  const requesterEmail = request.requester_email.toLowerCase();
+  const { data: authUsers, error: usersError } = await admin.auth.admin.listUsers({
+    page: 1,
+    perPage: 1000,
+  });
+
+  if (usersError) {
+    redirectWithPath(redirectPath, "error", usersError.message);
+  }
+
+  const existingUser = authUsers.users.find((authUser) => authUser.email?.toLowerCase() === requesterEmail);
+  let userId = existingUser?.id;
+
+  if (!userId) {
+    const { data: invitedUser, error: inviteError } = await admin.auth.admin.inviteUserByEmail(request.requester_email, {
+      data: {
+        first_name: request.requester_first_name,
+        last_name: request.requester_last_name,
+      },
+    });
+
+    if (inviteError || !invitedUser.user) {
+      redirectWithPath(redirectPath, "error", inviteError?.message ?? "Clinic admin invitation could not be created.");
+    }
+
+    userId = invitedUser.user.id;
+  }
+
+  const { error: profileError } = await admin.from("user_profiles").upsert({
+    id: userId,
+    company_id: company.id,
+    first_name: request.requester_first_name,
+    last_name: request.requester_last_name,
+    role: "clinic_admin",
+    account_status: "approved",
+  });
+
+  if (profileError) {
+    redirectWithPath(redirectPath, "error", profileError.message);
+  }
+
+  const { error: updateError } = await admin
+    .from("clinic_requests")
+    .update({ status: "approved" })
+    .eq("id", requestId);
+
+  if (updateError) {
+    redirectWithPath(redirectPath, "error", updateError.message);
+  }
+
+  revalidatePath("/");
+  revalidatePath("/admin/clinics");
+  revalidatePath("/admin/accounts");
+  redirectWithPath(redirectPath, "message", "Clinic approved and requester assigned as clinic admin.");
+}
+
+export async function denyClinicRequestAction(formData: FormData) {
+  await requireAdminSession();
+  const admin = createSupabaseAdminClient();
+  const requestId = getValue(formData, "id");
+  const redirectPath = getRedirectPath(formData, "/admin/clinics");
+
+  const { error } = await admin
+    .from("clinic_requests")
+    .update({ status: "rejected" })
+    .eq("id", requestId);
+
+  if (error) {
+    redirectWithPath(redirectPath, "error", error.message);
+  }
+
+  revalidatePath("/admin/clinics");
+  redirectWithPath(redirectPath, "message", "Clinic request denied.");
 }
 
 export async function bootstrapAdminAction(formData: FormData) {
@@ -246,6 +410,7 @@ export async function bootstrapAdminAction(formData: FormData) {
     first_name: firstName,
     last_name: lastName,
     role: "admin",
+    account_status: "approved",
   });
 
   if (profileError) {
@@ -338,6 +503,10 @@ export async function updateUserProfileAction(formData: FormData) {
     redirectWithPath(redirectPath, "error", "Your current session must remain an admin.");
   }
 
+  if (nextRole !== "admin" && !nextCompanyId) {
+    redirectWithPath(redirectPath, "error", "Clinic admins and customer accounts must be attached to an approved clinic.");
+  }
+
   const { error } = await admin
     .from("user_profiles")
     .update({
@@ -345,6 +514,7 @@ export async function updateUserProfileAction(formData: FormData) {
       last_name: optionalValue(formData, "last_name"),
       role: nextRole,
       company_id: nextCompanyId,
+      account_status: getValue(formData, "account_status") || "approved",
     })
     .eq("id", profileId);
 
@@ -354,6 +524,47 @@ export async function updateUserProfileAction(formData: FormData) {
 
   revalidatePath("/");
   redirectWithPath(redirectPath, "message", "User profile updated.");
+}
+
+export async function updateAccountApprovalAction(formData: FormData) {
+  const { profile } = await requireStaffSession();
+  const admin = createSupabaseAdminClient();
+  const profileId = getValue(formData, "id");
+  const nextStatus = getValue(formData, "account_status");
+  const redirectPath = getRedirectPath(formData, "/admin/accounts");
+
+  if (nextStatus !== "approved" && nextStatus !== "denied" && nextStatus !== "pending") {
+    redirectWithPath(redirectPath, "error", "Choose a valid account status.");
+  }
+
+  const { data: targetProfile, error: targetError } = await admin
+    .from("user_profiles")
+    .select("id, role, company_id")
+    .eq("id", profileId)
+    .single();
+
+  if (targetError || !targetProfile) {
+    redirectWithPath(redirectPath, "error", targetError?.message ?? "User profile could not be found.");
+  }
+
+  if (profile.role === "clinic_admin") {
+    if (targetProfile.role !== "customer" || targetProfile.company_id !== profile.company_id) {
+      redirectWithPath(redirectPath, "error", "Clinic admins can only approve or deny customer accounts for their clinic.");
+    }
+  }
+
+  const { error } = await admin
+    .from("user_profiles")
+    .update({ account_status: nextStatus })
+    .eq("id", profileId);
+
+  if (error) {
+    redirectWithPath(redirectPath, "error", error.message);
+  }
+
+  revalidatePath("/");
+  revalidatePath("/admin/accounts");
+  redirectWithPath(redirectPath, "message", `Account ${nextStatus}.`);
 }
 
 export async function updateCustomerAccountAction(formData: FormData) {
