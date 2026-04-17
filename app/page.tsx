@@ -84,6 +84,7 @@ type AdminSampleRow = {
   npi_number: string | null;
   hart_cadhs: boolean;
   hart_cve: boolean;
+  created_at: string;
 };
 
 type PatientRow = {
@@ -1645,10 +1646,16 @@ export async function loadAdminWorkspaceData(
   const admin = createSupabaseAdminClient();
   const isUltimateAdmin = profile.role === "admin";
   const staffCompanyId = profile.company_id;
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const tomorrowStart = new Date(todayStart);
+  tomorrowStart.setDate(tomorrowStart.getDate() + 1);
+  const todayStartIso = todayStart.toISOString();
+  const tomorrowStartIso = tomorrowStart.toISOString();
   let sampleQuery = admin
     .from("admin_sample_directory")
     .select(
-      "id, sample_number, company_id, company_name, patient_id, patient_first_name, patient_last_name, fedex_package_id, package_id, status, rejected, rejection_reason, received_at, collected_at, collected_by, sex, missing_info, icd10_codes, ordering_provider_name, npi_number, hart_cadhs, hart_cve",
+      "id, sample_number, company_id, company_name, patient_id, patient_first_name, patient_last_name, fedex_package_id, package_id, status, rejected, rejection_reason, received_at, collected_at, collected_by, sex, missing_info, icd10_codes, ordering_provider_name, npi_number, hart_cadhs, hart_cve, created_at",
     )
     .order("collected_at", { ascending: false })
     .limit(10);
@@ -1734,6 +1741,35 @@ export async function loadAdminWorkspaceData(
     );
   }
 
+  let todaySamplesQuery = admin
+    .from("admin_sample_directory")
+    .select(
+      "id, sample_number, company_id, company_name, patient_id, patient_first_name, patient_last_name, fedex_package_id, package_id, status, rejected, rejection_reason, received_at, collected_at, collected_by, sex, missing_info, icd10_codes, ordering_provider_name, npi_number, hart_cadhs, hart_cve, created_at",
+    )
+    .gte("created_at", todayStartIso)
+    .lt("created_at", tomorrowStartIso)
+    .order("created_at", { ascending: false });
+
+  let todayPatientsQuery = admin
+    .from("patients")
+    .select("id, company_id, first_name, last_name, date_of_birth, address_line_1, city, state, postal_code, phone_number, email_address, race_ethnicity, weight_lbs, height_inches, angioplasty_or_stent, cabg, created_at")
+    .gte("created_at", todayStartIso)
+    .lt("created_at", tomorrowStartIso)
+    .order("created_at", { ascending: false });
+
+  let todayDocumentsQuery = admin
+    .from("document_directory")
+    .select("id, company_id, company_name, patient_id, patient_first_name, patient_last_name, sample_id, sample_number, original_filename, storage_path, created_at")
+    .gte("created_at", todayStartIso)
+    .lt("created_at", tomorrowStartIso)
+    .order("created_at", { ascending: false });
+
+  if (!isUltimateAdmin && staffCompanyId) {
+    todaySamplesQuery = todaySamplesQuery.eq("company_id", staffCompanyId);
+    todayPatientsQuery = todayPatientsQuery.eq("company_id", staffCompanyId);
+    todayDocumentsQuery = todayDocumentsQuery.eq("company_id", staffCompanyId);
+  }
+
   const [
     companiesResult,
     clinicRequestsResult,
@@ -1742,6 +1778,9 @@ export async function loadAdminWorkspaceData(
     patientsResult,
     packagesResult,
     documentsResult,
+    todaySamplesResult,
+    todayPatientsResult,
+    todayDocumentsResult,
     authUsersResult,
   ] =
     await Promise.all([
@@ -1773,6 +1812,9 @@ export async function loadAdminWorkspaceData(
         .order("created_at", { ascending: false })
         .limit(10),
       documentQuery,
+      todaySamplesQuery,
+      todayPatientsQuery,
+      todayDocumentsQuery,
       admin.auth.admin.listUsers({ page: 1, perPage: 200 }),
     ]);
 
@@ -1786,12 +1828,15 @@ export async function loadAdminWorkspaceData(
     companies: (companiesResult.data ?? []) as CompanyRow[],
     clinicRequests: (clinicRequestsResult.data ?? []) as ClinicRequestRow[],
     accounts: ((accountsResult.data ?? []) as AdminUserRow[]).filter((account) =>
-      isUltimateAdmin ? true : account.role === "customer",
+      isUltimateAdmin ? ["customer", "clinic_admin"].includes(account.role) : account.role === "customer",
     ),
     samples: (samplesResult.data ?? []) as AdminSampleRow[],
     patients: (patientsResult.data ?? []) as PatientRow[],
     packages: (packagesResult.data ?? []) as PackageRow[],
     documents: (documentsResult.data ?? []) as DocumentRow[],
+    todaySamples: (todaySamplesResult.data ?? []) as AdminSampleRow[],
+    todayPatients: (todayPatientsResult.data ?? []) as PatientRow[],
+    todayDocuments: (todayDocumentsResult.data ?? []) as DocumentRow[],
     message,
     error,
     q,
@@ -1828,6 +1873,9 @@ export function AdminWorkspace({
   patients,
   packages,
   documents,
+  todaySamples,
+  todayPatients,
+  todayDocuments,
   message,
   error,
   q,
@@ -1862,6 +1910,9 @@ export function AdminWorkspace({
   patients: PatientRow[];
   packages: PackageRow[];
   documents: DocumentRow[];
+  todaySamples: AdminSampleRow[];
+  todayPatients: PatientRow[];
+  todayDocuments: DocumentRow[];
   message: string;
   error: string;
   q: string;
@@ -1895,6 +1946,7 @@ export function AdminWorkspace({
       Boolean(patientDraft.firstName && patientDraft.lastName && patientDraft.dateOfBirth));
   const canAdvanceAdminToFiles = canAdvanceAdminToSample && Boolean(sampleDraft.sampleNumber);
   const canAdvanceAdminToPackage = canAdvanceAdminToFiles;
+  const pendingClinicRequests = clinicRequests.filter((request) => request.status === "pending");
   const adminPatientStepHref = buildPath("/admin/intake", { intake_step: "patient" });
   const adminSampleStepHref = buildPath("/admin/intake", {
     intake_step: "sample",
@@ -1990,10 +2042,6 @@ export function AdminWorkspace({
       <aside className="admin-sidebar admin-sidebar--portal">
         <div className="admin-sidebar__brand">
           <img className="brand-logo brand-logo--sidebar" src="/completeomics-logo.png" alt="Complete Omics" />
-          <div>
-            <p className="eyebrow">Complete Omics</p>
-            <p className="brand">Admin Panel</p>
-          </div>
         </div>
 
         <nav className="admin-sidebar__nav">
@@ -2003,7 +2051,10 @@ export function AdminWorkspace({
           <a className={`admin-nav-item ${activePage === "clinics" ? "admin-nav-item--active" : ""}`} href="/admin/clinics">Clinics</a>
           <a className={`admin-nav-item ${activePage === "accounts" ? "admin-nav-item--active" : ""}`} href="/admin/accounts">Accounts</a>
           <a className={`admin-nav-item ${activePage === "operations" ? "admin-nav-item--active" : ""}`} href="/admin/documents">Documents</a>
-          <a className={`admin-nav-item ${activePage === "messages" ? "admin-nav-item--active" : ""}`} href="/admin/messages">Messages</a>
+          <span className="admin-nav-item admin-nav-item--disabled" aria-disabled="true">
+            Inbox
+            <small>Coming Soon</small>
+          </span>
         </nav>
 
         <div className="admin-sidebar__meta">
@@ -2020,11 +2071,9 @@ export function AdminWorkspace({
       <div className="admin-content">
         <div className="admin-utilitybar">
           <div>
-            <p className="eyebrow">Operations Hub</p>
-            <strong>Admin Dashboard</strong>
+            <strong>Admin Portal</strong>
           </div>
           <div className="admin-utilitybar__chips">
-            <span>Live Database</span>
             <span>{companies.length} clinics</span>
             <span>{samples.length} samples in view</span>
           </div>
@@ -2036,13 +2085,10 @@ export function AdminWorkspace({
           </div>
         )}
 
-        {activePage === "overview" && <section className="admin-header admin-header--portal" id="admin-overview">
+        {activePage === "overview" && <>
+        <section className="admin-header admin-header--portal" id="admin-overview">
           <div className="admin-header__title">
-            <img className="brand-logo brand-logo--badge" src="/completeomics-logo.png" alt="Complete Omics" />
-            <div>
-              <p className="eyebrow">Platform Admin</p>
-              <h1>{profile?.first_name ? `${profile.first_name}'s Admin Console` : "Admin Console"}</h1>
-            </div>
+            <h1>Admin Console</h1>
           </div>
 
           <div className="admin-kpis">
@@ -2064,7 +2110,113 @@ export function AdminWorkspace({
             </article>
           </div>
 
-        </section>}
+        </section>
+
+        <section className="admin-overview-grid">
+          <article className="panel admin-overview-card admin-overview-card--inbox">
+            <div className="panel__header">
+              <div>
+                <p className="eyebrow">Inbox</p>
+                <h3>Incoming messages</h3>
+              </div>
+              <span className="coming-soon-pill">Coming Soon</span>
+            </div>
+            <div className="empty-state">Live inbox messages will appear here once messaging is connected.</div>
+          </article>
+
+          <article className="panel admin-overview-card">
+            <div className="panel__header">
+              <div>
+                <h3>Clinic Requests</h3>
+              </div>
+              <span className="admin-overview-count">{pendingClinicRequests.length}</span>
+            </div>
+            <div className="list-grid">
+              {pendingClinicRequests.map((request) => (
+                <div className="list-row" key={request.id}>
+                  <strong>{request.clinic_name}</strong>
+                  <span>
+                    Clinic request
+                    {" | "}
+                    {request.requester_first_name} {request.requester_last_name}
+                    {" | "}
+                    {request.requester_email}
+                  </span>
+                </div>
+              ))}
+              {pendingClinicRequests.length === 0 && <div className="empty-state">No pending clinic requests.</div>}
+            </div>
+          </article>
+
+          <article className="panel admin-overview-card panel--wide">
+            <div className="panel__header">
+              <div>
+                <p className="eyebrow">Daily Activity</p>
+                <h3>Created today</h3>
+              </div>
+              <span className="admin-overview-count">
+                {todaySamples.length + todayPatients.length + todayDocuments.length}
+              </span>
+            </div>
+            <div className="today-activity-grid">
+              <section>
+                <p className="eyebrow">Samples</p>
+                <div className="list-grid">
+                  {todaySamples.map((sample) => (
+                    <div className="list-row" key={sample.id}>
+                      <strong>{sample.sample_number}</strong>
+                      <span>
+                        {sample.patient_first_name} {sample.patient_last_name}
+                        {" | "}
+                        {sample.company_name}
+                        {" | "}
+                        {formatDateTime(sample.created_at)}
+                      </span>
+                    </div>
+                  ))}
+                  {todaySamples.length === 0 && <div className="empty-state">No samples created today.</div>}
+                </div>
+              </section>
+
+              <section>
+                <p className="eyebrow">Documents</p>
+                <div className="list-grid">
+                  {todayDocuments.map((document) => (
+                    <div className="list-row" key={document.id}>
+                      <strong>{document.original_filename}</strong>
+                      <span>
+                        {document.sample_number ?? "No sample"}
+                        {" | "}
+                        {[document.patient_first_name, document.patient_last_name].filter(Boolean).join(" ") || "No patient"}
+                        {" | "}
+                        {formatDateTime(document.created_at ?? null)}
+                      </span>
+                    </div>
+                  ))}
+                  {todayDocuments.length === 0 && <div className="empty-state">No documents created today.</div>}
+                </div>
+              </section>
+
+              <section>
+                <p className="eyebrow">Patients</p>
+                <div className="list-grid">
+                  {todayPatients.map((patient) => (
+                    <div className="list-row" key={patient.id}>
+                      <strong>{patient.first_name} {patient.last_name}</strong>
+                      <span>
+                        DOB {formatDate(patient.date_of_birth)}
+                        {" | "}
+                        {formatDateTime(patient.created_at)}
+                      </span>
+                    </div>
+                  ))}
+                  {todayPatients.length === 0 && <div className="empty-state">No patients created today.</div>}
+                </div>
+              </section>
+            </div>
+          </article>
+        </section>
+        </>}
 
         {activePage === "samples" && <section className="admin-panel" id="admin-samples">
           <div className="admin-panel__header">
@@ -2788,7 +2940,7 @@ export function AdminWorkspace({
           <div className="data-grid">
           <article className="panel panel--wide">
             <p className="eyebrow">User Profiles</p>
-            <h3>Customer and admin access</h3>
+            <h3>Customer and clinic admin access</h3>
             <div className="admin-record-list admin-record-list--accounts">
               <div className="admin-record-list__head">
                 <span>Email</span>
@@ -2829,7 +2981,6 @@ export function AdminWorkspace({
                       <span>Created</span>
                     </div>
                     <div className="admin-record__actions">
-                      <strong>{account.role === "admin" ? "Admin" : account.role === "clinic_admin" ? "Clinic Admin" : "Customer"}</strong>
                       <span className="admin-record__toggle">{isUltimateAdmin ? "Edit" : "Review"}</span>
                     </div>
                   </summary>
@@ -2852,7 +3003,6 @@ export function AdminWorkspace({
                       <select name="role" defaultValue={account.role}>
                         <option value="customer">customer</option>
                         <option value="clinic_admin">clinic_admin</option>
-                        <option value="admin">admin</option>
                       </select>
                     </div>
                     <div className="field">
@@ -2922,7 +3072,6 @@ export function AdminWorkspace({
         {activePage === "clinics" && <section className="admin-panel" id="admin-clinics">
           <div className="admin-panel__header">
             <div>
-              <p className="eyebrow">Clinics</p>
               <h2>Clinics</h2>
             </div>
           </div>
@@ -2930,8 +3079,7 @@ export function AdminWorkspace({
           {isUltimateAdmin && <article className="panel clinic-requests-panel">
             <div className="panel__header">
               <div>
-                <p className="eyebrow">Clinic Requests</p>
-                <h3>Pending clinic additions</h3>
+                <h3>Clinic Requests</h3>
               </div>
               <span>{clinicRequests.length} requests</span>
             </div>
@@ -2994,7 +3142,7 @@ export function AdminWorkspace({
               <span>Contact</span>
               <span>Email</span>
               <span>Fax</span>
-              <span>Edit</span>
+              <span></span>
             </div>
             {companies.map((company) => (
               <details className="admin-record" key={company.id}>
@@ -3020,7 +3168,6 @@ export function AdminWorkspace({
                     <span>Fax Number</span>
                   </div>
                   <div className="admin-record__actions">
-                    <strong>Clinic</strong>
                     <span className="admin-record__toggle">Edit</span>
                   </div>
                 </summary>
@@ -3084,62 +3231,7 @@ export function AdminWorkspace({
             </div>
           </div>
 
-          <div className="create-grid">
-            <form action={uploadDocumentAction} className="panel form-panel">
-              <input type="hidden" name="redirect_to" value="/admin/documents" />
-              <p className="eyebrow">Document Upload</p>
-              <h3>Attach to patient and sample</h3>
-              {isUltimateAdmin && (
-                <div className="field">
-                  <label>Clinic</label>
-                  <select name="company_id" defaultValue="" required>
-                    <CompanyOptions companies={companies} />
-                  </select>
-                </div>
-              )}
-              <div className="field">
-                <label>Patient</label>
-                <input name="patient_id" list="admin-document-patient-options" placeholder="Type patient name" required />
-                <datalist id="admin-document-patient-options">
-                  <PatientLookupOptions patients={patients} />
-                </datalist>
-              </div>
-              <div className="field">
-                <label>Sample</label>
-                <input name="sample_id" list="admin-document-sample-options" placeholder="Type sample number" required />
-                <datalist id="admin-document-sample-options">
-                  {samples.map((sample) => (
-                    <option key={sample.id} value={`${sample.sample_number} | ${sample.id}`} />
-                  ))}
-                </datalist>
-              </div>
-              <div className="field">
-                <label>File</label>
-                <input name="document" type="file" accept=".pdf,image/png,image/jpeg" required />
-              </div>
-              <button className="button button--secondary" type="submit">
-                Upload Document
-              </button>
-            </form>
-
-            <article className="panel">
-              <p className="eyebrow">Document Rules</p>
-              <h3>Required links</h3>
-              <div className="list-grid">
-                <div className="list-row">
-                  <strong>Patient required</strong>
-                  <span>Every uploaded document must be tied to a patient.</span>
-                </div>
-                <div className="list-row">
-                  <strong>Sample required</strong>
-                  <span>The selected sample must belong to the selected patient.</span>
-                </div>
-              </div>
-            </article>
-          </div>
-
-          <div className="data-grid">
-          <article className="panel panel--wide">
+          <article className="panel panel--wide document-directory-panel">
             <p className="eyebrow">Document Directory</p>
             <h3>Search patient or sample documents</h3>
             <form className="search-form" method="get">
@@ -3166,8 +3258,53 @@ export function AdminWorkspace({
               ))}
               {documents.length === 0 && <div className="empty-state">No documents found.</div>}
             </div>
+
+            <details className="document-add-dropdown">
+              <summary className="button button--secondary">Add Document</summary>
+              <form action={uploadDocumentAction} className="document-add-form">
+                <input type="hidden" name="redirect_to" value="/admin/documents" />
+                <div className="document-add-form__header">
+                  <p className="eyebrow">Add Document</p>
+                  <h3>Attach to patient and sample</h3>
+                </div>
+                <div className="form-grid">
+                  {isUltimateAdmin && (
+                    <div className="field">
+                      <label>Clinic</label>
+                      <select name="company_id" defaultValue="" required>
+                        <CompanyOptions companies={companies} />
+                      </select>
+                    </div>
+                  )}
+                  <div className="field">
+                    <label>Patient</label>
+                    <input name="patient_id" list="admin-document-patient-options" placeholder="Type patient name" required />
+                    <datalist id="admin-document-patient-options">
+                      <PatientLookupOptions patients={patients} />
+                    </datalist>
+                  </div>
+                  <div className="field">
+                    <label>Sample</label>
+                    <input name="sample_id" list="admin-document-sample-options" placeholder="Type sample number" required />
+                    <datalist id="admin-document-sample-options">
+                      {samples.map((sample) => (
+                        <option key={sample.id} value={`${sample.sample_number} | ${sample.id}`} />
+                      ))}
+                    </datalist>
+                  </div>
+                  <div className="field">
+                    <label>File</label>
+                    <input name="document" type="file" accept=".pdf,image/png,image/jpeg" required />
+                  </div>
+                </div>
+                <div className="document-add-form__actions">
+                  <button className="button button--secondary" type="submit">
+                    Upload Document
+                  </button>
+                </div>
+              </form>
+            </details>
           </article>
-          </div>
         </section>}
 
         {activePage === "messages" && <section className="admin-panel" id="admin-messages">
