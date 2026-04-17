@@ -897,6 +897,11 @@ textarea {
   color: #17324a;
 }
 
+.admin-export-card .panel__header {
+  display: block;
+  margin-bottom: 0;
+}
+
 .admin-overview-card--inbox {
   background:
     radial-gradient(circle at right top, rgba(62, 143, 196, 0.12), transparent 34%),
@@ -941,11 +946,22 @@ textarea {
   display: grid;
   grid-template-columns: repeat(4, minmax(120px, 1fr));
   gap: 10px;
+  margin-top: 14px;
 }
 
 .export-button-grid .button {
   justify-content: center;
   width: 100%;
+  border: 1px solid rgba(31, 95, 145, 0.2);
+  color: #174b73;
+  background: linear-gradient(180deg, #f1f8fc, #dfeef7);
+  font-weight: 800;
+  box-shadow: 0 10px 22px rgba(31, 95, 145, 0.08);
+}
+
+.export-button-grid .button:hover {
+  color: #fff;
+  background: linear-gradient(90deg, #3e8fc4, #1f5f91);
 }
 
 .admin-kpis span {
