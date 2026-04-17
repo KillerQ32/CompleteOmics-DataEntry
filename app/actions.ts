@@ -919,6 +919,38 @@ export async function updateSampleAction(formData: FormData) {
   redirectWithPath(redirectPath, "message", "Sample updated.");
 }
 
+export async function reviewIncomingSampleAction(formData: FormData) {
+  await requireAdminSession();
+  const admin = createSupabaseAdminClient();
+  const sampleId = getValue(formData, "id");
+  const decision = getValue(formData, "decision");
+  const redirectPath = getRedirectPath(formData, "/admin/samples");
+
+  const update =
+    decision === "reject"
+      ? {
+          rejected: true,
+          status: "rejected",
+          rejection_reason: optionalValue(formData, "rejection_reason") ?? "Rejected during incoming sample review.",
+        }
+      : {
+          rejected: false,
+          status: "ready_for_review",
+          rejection_reason: null,
+          rejected_at: null,
+          rejected_by: null,
+        };
+
+  const { error } = await admin.from("samples").update(update).eq("id", sampleId);
+
+  if (error) {
+    redirectWithPath(redirectPath, "error", error.message);
+  }
+
+  revalidatePath("/");
+  redirectWithPath(redirectPath, "message", decision === "reject" ? "Sample rejected." : "Sample accepted.");
+}
+
 export async function uploadDocumentAction(formData: FormData) {
   const uploadCandidate = formData.get("document");
   const redirectPath = getRedirectPath(formData);

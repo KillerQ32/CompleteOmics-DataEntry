@@ -792,6 +792,7 @@ textarea {
 }
 
 .admin-content {
+  min-width: 0;
   padding: 28px;
 }
 
@@ -988,6 +989,7 @@ textarea {
 
 .admin-record-list {
   display: grid;
+  min-width: 0;
 }
 
 .admin-record-list__head,
@@ -1000,33 +1002,79 @@ textarea {
 
 .admin-record-list--samples .admin-record-list__head,
 .admin-record-list--samples .admin-record__summary {
-  grid-template-columns: 1.05fr 1.05fr 1.05fr 0.82fr 0.55fr 0.68fr 0.62fr 0.78fr 0.82fr;
+  grid-template-columns: minmax(112px, 1fr) minmax(112px, 1fr) minmax(126px, 1fr) minmax(100px, 0.75fr) minmax(72px, 0.48fr) minmax(82px, 0.56fr) minmax(76px, 0.5fr) minmax(100px, 0.68fr) minmax(108px, 0.72fr) 72px;
+  gap: 10px;
+}
+
+.admin-record-list--samples .admin-record__summary strong {
+  font-size: 0.92rem;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.admin-record__summary > div {
+  min-width: 0;
 }
 
 .admin-sample-column-filters {
   display: grid;
   gap: 12px;
   margin-bottom: 18px;
-  padding: 18px;
+  padding: 0;
   border: 1px solid rgba(31, 95, 145, 0.12);
-  border-radius: 22px;
+  border-radius: 20px;
   background: #f7fbff;
+  overflow: hidden;
 }
 
-.admin-sample-column-filters .admin-record-list__head,
+.admin-sample-column-filters summary {
+  width: 100%;
+  padding: 13px 16px;
+  color: #17324a;
+  background: linear-gradient(90deg, #eef6fb, #f8fcff);
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 800;
+  list-style: none;
+}
+
+.admin-sample-column-filters summary::after {
+  content: "Open filters";
+  float: right;
+  color: #1f5f91;
+  font-size: 0.76rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.admin-sample-column-filters[open] summary::after {
+  content: "Hide filters";
+}
+
+.admin-sample-column-filters summary::-webkit-details-marker {
+  display: none;
+}
+
+.admin-sample-filter-panel {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border-top: 1px solid rgba(31, 95, 145, 0.1);
+}
+
 .admin-sample-filter-row {
   display: grid;
-  grid-template-columns: 1.05fr 1.05fr 1.05fr 0.82fr 0.55fr 0.68fr 0.62fr 0.78fr 0.82fr;
-  gap: 12px;
+  grid-template-columns: repeat(9, minmax(0, 1fr));
+  gap: 8px;
   align-items: center;
 }
 
 .admin-sample-filter-row input,
 .admin-sample-filter-row select {
   min-width: 0;
-  padding: 11px 12px;
-  border-radius: 14px;
-  font-size: 0.9rem;
+  padding: 9px 10px;
+  border-radius: 12px;
+  font-size: 0.82rem;
 }
 
 .admin-sample-filter-actions {
@@ -1034,6 +1082,71 @@ textarea {
   flex-wrap: wrap;
   gap: 10px;
   justify-content: flex-end;
+}
+
+.admin-record-list--samples .admin-record__actions {
+  justify-items: center;
+}
+
+.incoming-samples-panel {
+  display: grid;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.incoming-samples-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.incoming-sample-card {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.9fr) minmax(150px, 1fr) minmax(180px, 1.1fr) minmax(110px, 0.7fr) auto;
+  gap: 14px;
+  align-items: center;
+  padding: 13px 16px;
+  border: 1px solid rgba(31, 95, 145, 0.1);
+  border-radius: 16px;
+  background: #f8fcff;
+}
+
+.incoming-sample-card > div {
+  min-width: 0;
+}
+
+.incoming-sample-card strong {
+  color: #17324a;
+  font-size: 1rem;
+  overflow-wrap: anywhere;
+}
+
+.incoming-sample-card span {
+  color: #5b7386;
+  font-size: 0.88rem;
+  overflow-wrap: anywhere;
+}
+
+.incoming-sample-card__status span {
+  display: inline-flex;
+  padding: 6px 10px;
+  border-radius: 999px;
+  color: #1f5f91;
+  background: rgba(62, 143, 196, 0.1);
+  font-weight: 700;
+}
+
+.incoming-sample-card__actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.incoming-sample-card__actions form {
+  margin: 0;
+}
+
+.incoming-sample-card__actions .button {
+  min-width: 68px;
 }
 
 .admin-record-list--accounts .admin-record-list__head,
@@ -1871,6 +1984,9 @@ textarea {
 
 .customer-drawer .customer-site-link {
   display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
   padding: 14px 16px;
   border: 1px solid rgba(214, 17, 36, 0.12);
   border-radius: 16px;
@@ -1884,6 +2000,22 @@ textarea {
 .customer-drawer .customer-site-link--active {
   border-color: rgba(214, 17, 36, 0.28);
   background: rgba(214, 17, 36, 0.1);
+}
+
+.customer-drawer .customer-site-link--disabled {
+  cursor: not-allowed;
+  opacity: 0.72;
+}
+
+.customer-drawer .customer-site-link small {
+  padding: 4px 8px;
+  border-radius: 999px;
+  color: #d61124;
+  background: rgba(214, 17, 36, 0.08);
+  font-size: 0.64rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .customer-drawer .button--secondary {
@@ -2504,7 +2636,6 @@ textarea {
 
   .admin-kpis,
   .admin-toolbar,
-  .admin-sample-column-filters .admin-record-list__head,
   .admin-sample-filter-row,
   .admin-record-list__head,
   .admin-record__summary {

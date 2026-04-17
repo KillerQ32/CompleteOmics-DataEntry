@@ -5,6 +5,7 @@ import {
   createPackageAction,
   createPatientAction,
   denyClinicRequestAction,
+  reviewIncomingSampleAction,
   signInAction,
   signOutAction,
   signUpAction,
@@ -736,7 +737,10 @@ function CustomerWorkspace({
           <CustomerShellLink href="/?customer_view=operations" label="Documents" active={customerView === "operations"} />
           <CustomerShellLink href="/?customer_view=account" label="Account" active={customerView === "account"} />
           <CustomerShellLink href="/?customer_view=contact" label="Contact Us" active={customerView === "contact"} />
-          <CustomerShellLink href="/?customer_view=chat" label="Live Chat" active={customerView === "chat"} />
+          <span className="customer-site-link customer-site-link--disabled" aria-disabled="true">
+            Live Chat
+            <small>Coming Soon</small>
+          </span>
         </nav>
         <form action={signOutAction}>
           <button className="button button--secondary" type="submit">
@@ -1947,6 +1951,7 @@ export function AdminWorkspace({
   const canAdvanceAdminToFiles = canAdvanceAdminToSample && Boolean(sampleDraft.sampleNumber);
   const canAdvanceAdminToPackage = canAdvanceAdminToFiles;
   const pendingClinicRequests = clinicRequests.filter((request) => request.status === "pending");
+  const incomingSamples = samples.filter((sample) => !sample.rejected);
   const adminPatientStepHref = buildPath("/admin/intake", { intake_step: "patient" });
   const adminSampleStepHref = buildPath("/admin/intake", {
     intake_step: "sample",
@@ -2221,7 +2226,6 @@ export function AdminWorkspace({
         {activePage === "samples" && <section className="admin-panel" id="admin-samples">
           <div className="admin-panel__header">
             <div>
-              <p className="eyebrow">Sample Data</p>
               <h2>Samples</h2>
             </div>
             <a className="button button--primary button--compact" href="/admin/intake?intake_step=patient">
@@ -2229,7 +2233,93 @@ export function AdminWorkspace({
             </a>
           </div>
 
-          <form className="admin-sample-column-filters" method="get">
+          <article className="panel incoming-samples-panel">
+            <div className="panel__header">
+              <h3>Incoming Samples</h3>
+              <span className="admin-overview-count">{incomingSamples.length}</span>
+            </div>
+            <div className="incoming-samples-grid">
+              {incomingSamples.slice(0, 6).map((sample) => (
+                <div className="incoming-sample-card" key={sample.id}>
+                  <div className="incoming-sample-card__sample">
+                    <strong>{sample.sample_number}</strong>
+                  </div>
+                  <div className="incoming-sample-card__patient">
+                    <strong>{sample.patient_first_name} {sample.patient_last_name}</strong>
+                  </div>
+                  <div className="incoming-sample-card__clinic">
+                    <span>{sample.company_name}</span>
+                  </div>
+                  <div className="incoming-sample-card__status">
+                    <span>{sample.status.replaceAll("_", " ")}</span>
+                  </div>
+                  <div className="incoming-sample-card__actions">
+                    <form action={reviewIncomingSampleAction}>
+                      <input type="hidden" name="id" value={sample.id} />
+                      <input type="hidden" name="decision" value="accept" />
+                      <input type="hidden" name="redirect_to" value="/admin/samples" />
+                      <button className="button button--secondary button--compact" type="submit">
+                        Accept
+                      </button>
+                    </form>
+                    <form action={reviewIncomingSampleAction}>
+                      <input type="hidden" name="id" value={sample.id} />
+                      <input type="hidden" name="decision" value="reject" />
+                      <input type="hidden" name="redirect_to" value="/admin/samples" />
+                      <button className="button button--ghost button--compact" type="submit">
+                        Reject
+                      </button>
+                    </form>
+                  </div>
+                </div>
+              ))}
+              {incomingSamples.length === 0 && <div className="empty-state">No incoming samples awaiting rejection review.</div>}
+            </div>
+          </article>
+
+          <details className="admin-sample-column-filters">
+            <summary>Filter Samples</summary>
+            <form className="admin-sample-filter-panel" method="get">
+              <div className="admin-sample-filter-row">
+                <input name="admin_sample_number" defaultValue={adminSampleNumberFilter} placeholder="Sample" />
+                <input name="admin_patient" defaultValue={adminPatientFilter} placeholder="Patient" />
+                <input name="admin_clinic" defaultValue={adminClinicFilter} placeholder="Clinic" />
+                <select name="admin_status" defaultValue={adminStatusFilter}>
+                  <option value="">All statuses</option>
+                  <option value="draft">draft</option>
+                  <option value="submitted">submitted</option>
+                  <option value="mailed">mailed</option>
+                  <option value="received">received</option>
+                  <option value="ready_for_review">ready_for_review</option>
+                  <option value="awaiting_documentation">awaiting_documentation</option>
+                  <option value="rejected">rejected</option>
+                </select>
+                <input name="admin_sex" defaultValue={adminSexFilter} placeholder="Sex" />
+                <select name="admin_hart_cadhs" defaultValue={adminHartCadhsFilter}>
+                  <option value="">CADhs</option>
+                  <option value="true">CADhs: Yes</option>
+                  <option value="false">CADhs: No</option>
+                </select>
+                <select name="admin_hart_cve" defaultValue={adminHartCveFilter}>
+                  <option value="">CVE</option>
+                  <option value="true">CVE: Yes</option>
+                  <option value="false">CVE: No</option>
+                </select>
+                <input name="admin_collected" type="date" defaultValue={adminCollectedFilter} />
+                <input name="admin_received" type="date" defaultValue={adminReceivedFilter} />
+              </div>
+              <div className="admin-sample-filter-actions">
+                <button className="button button--secondary button--compact" type="submit">
+                  Apply Filters
+                </button>
+                <a className="button button--ghost button--compact" href="/admin/samples">
+                  Clear
+                </a>
+              </div>
+            </form>
+          </details>
+
+          <div className="admin-record-list admin-record-list--samples">
             <div className="admin-record-list__head">
               <span>Sample</span>
               <span>Patient</span>
@@ -2240,85 +2330,41 @@ export function AdminWorkspace({
               <span>Hart CVE</span>
               <span>Collected</span>
               <span>Received</span>
+              <span></span>
             </div>
-            <div className="admin-sample-filter-row">
-              <input name="admin_sample_number" defaultValue={adminSampleNumberFilter} placeholder="Filter sample" />
-              <input name="admin_patient" defaultValue={adminPatientFilter} placeholder="Filter patient" />
-              <input name="admin_clinic" defaultValue={adminClinicFilter} placeholder="Filter clinic" />
-              <select name="admin_status" defaultValue={adminStatusFilter}>
-                <option value="">All statuses</option>
-                <option value="draft">draft</option>
-                <option value="submitted">submitted</option>
-                <option value="mailed">mailed</option>
-                <option value="received">received</option>
-                <option value="ready_for_review">ready_for_review</option>
-                <option value="awaiting_documentation">awaiting_documentation</option>
-                <option value="rejected">rejected</option>
-              </select>
-              <input name="admin_sex" defaultValue={adminSexFilter} placeholder="Filter sex" />
-              <select name="admin_hart_cadhs" defaultValue={adminHartCadhsFilter}>
-                <option value="">All</option>
-                <option value="true">Yes</option>
-                <option value="false">No</option>
-              </select>
-              <select name="admin_hart_cve" defaultValue={adminHartCveFilter}>
-                <option value="">All</option>
-                <option value="true">Yes</option>
-                <option value="false">No</option>
-              </select>
-              <input name="admin_collected" type="date" defaultValue={adminCollectedFilter} />
-              <input name="admin_received" type="date" defaultValue={adminReceivedFilter} />
-            </div>
-            <div className="admin-sample-filter-actions">
-              <button className="button button--secondary button--compact" type="submit">
-                Apply Filters
-              </button>
-              <a className="button button--ghost button--compact" href="/admin/samples">
-                Clear
-              </a>
-            </div>
-          </form>
-
-          <div className="admin-record-list admin-record-list--samples">
             {samples.map((sample) => (
               <details className="admin-record" key={sample.id}>
                 <summary className="admin-record__summary">
                   <div>
                     <strong>{sample.sample_number}</strong>
-                    <span>{sample.package_id ?? "No package assigned"}</span>
                   </div>
                   <div>
                     <strong>
                       {sample.patient_first_name} {sample.patient_last_name}
                     </strong>
-                    <span>Patient record</span>
                   </div>
                   <div>
                     <strong>{sample.company_name}</strong>
-                    <span>{sample.fedex_package_id ? "Linked package" : "Unassigned package"}</span>
                   </div>
                   <div>
-                    <strong>{sample.rejected ? "Rejected" : sample.status}</strong>
-                    <span>{sample.rejection_reason ?? "No rejection reason"}</span>
+                    <strong>{sample.rejected ? "Rejected" : sample.status.replaceAll("_", " ")}</strong>
                   </div>
                   <div>
                     <strong>{sample.sex ?? "Not set"}</strong>
-                    <span>Sex</span>
                   </div>
                   <div>
                     <strong>{sample.hart_cadhs ? "Yes" : "No"}</strong>
-                    <span>Hart CADhs</span>
                   </div>
                   <div>
                     <strong>{sample.hart_cve ? "Yes" : "No"}</strong>
-                    <span>Hart CVE</span>
                   </div>
                   <div>
-                    <strong>{formatDate(sample.collected_at)}</strong>
-                    <span>Collected</span>
+                    <strong>{sample.collected_at ? formatDate(sample.collected_at) : "Not collected"}</strong>
+                  </div>
+                  <div>
+                    <strong>{sample.received_at ? formatDate(sample.received_at) : "Not received"}</strong>
                   </div>
                   <div className="admin-record__actions">
-                    <strong>{formatDate(sample.received_at)}</strong>
                     <span className="admin-record__toggle">Edit</span>
                   </div>
                 </summary>
