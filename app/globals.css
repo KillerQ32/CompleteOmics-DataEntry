@@ -937,6 +937,17 @@ textarea {
   gap: 12px;
 }
 
+.export-button-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(120px, 1fr));
+  gap: 10px;
+}
+
+.export-button-grid .button {
+  justify-content: center;
+  width: 100%;
+}
+
 .admin-kpis span {
   display: block;
   color: #1f5f91;
@@ -2281,144 +2292,39 @@ textarea {
   color: #d61124;
 }
 
-.portal-chat-panel {
+.contact-message-list {
   display: grid;
-  gap: 18px;
-  padding: 24px;
-  border: 1px solid rgba(214, 17, 36, 0.16);
-  border-radius: 26px;
-  background:
-    radial-gradient(circle at right top, rgba(214, 17, 36, 0.1), transparent 16rem),
-    #fff;
-  box-shadow: 0 18px 42px rgba(150, 34, 44, 0.1);
-  animation: customerPageIn 220ms ease both;
+  gap: 14px;
 }
 
-.portal-chat-panel--standalone {
-  margin-top: 0;
-}
-
-.portal-chat-panel__header,
-.admin-chat-window__header {
-  display: flex;
-  gap: 16px;
-  justify-content: space-between;
-  align-items: flex-start;
-}
-
-.portal-chat-panel__header h3,
-.admin-chat-window__header h3 {
-  margin: 0;
-  color: #172032;
-}
-
-.portal-chat-panel__header span,
-.admin-chat-window__header span,
-.admin-chat-thread-card span {
-  width: fit-content;
-  padding: 6px 10px;
-  border-radius: 999px;
-  color: #d61124;
-  background: rgba(214, 17, 36, 0.1);
-  font-size: 0.76rem;
-  font-weight: 900;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-.portal-chat-thread {
+.contact-message-card {
   display: grid;
-  gap: 12px;
-}
-
-.portal-chat-message {
-  max-width: min(520px, 90%);
-  padding: 14px 16px;
-  border-radius: 18px;
-  line-height: 1.6;
-}
-
-.portal-chat-message strong {
-  display: block;
-  margin-bottom: 4px;
-  color: #172032;
-}
-
-.portal-chat-message p {
-  margin: 0;
-  color: #4f6173;
-}
-
-.portal-chat-message--admin {
-  justify-self: start;
-  border: 1px solid rgba(31, 95, 145, 0.12);
-  background: #f5f9fc;
-}
-
-.portal-chat-message--customer {
-  justify-self: end;
-  color: #fff;
-  background: linear-gradient(135deg, #ff3945, #d61124);
-}
-
-.portal-chat-message--customer strong,
-.portal-chat-message--customer p {
-  color: #fff;
-}
-
-.portal-chat-compose {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 12px;
-  align-items: center;
-}
-
-.portal-chat-compose input {
-  min-height: 48px;
-}
-
-.admin-chat-layout {
-  display: grid;
-  grid-template-columns: minmax(260px, 0.38fr) minmax(0, 1fr);
-  gap: 18px;
-}
-
-.admin-chat-inbox {
-  display: grid;
-  gap: 12px;
-}
-
-.admin-chat-thread-card {
-  display: grid;
-  gap: 8px;
+  grid-template-columns: minmax(180px, 0.9fr) minmax(200px, 1fr) minmax(150px, 0.72fr);
+  gap: 14px;
   padding: 16px;
   border: 1px solid rgba(31, 95, 145, 0.12);
   border-radius: 18px;
-  background: #f8fbfd;
+  background: #f8fcff;
 }
 
-.admin-chat-thread-card--active {
-  border-color: rgba(214, 17, 36, 0.22);
-  background: #fff6f7;
+.contact-message-card strong {
+  display: block;
+  color: #17324a;
 }
 
-.admin-chat-thread-card strong {
-  color: #172032;
+.contact-message-card span,
+.contact-message-card p {
+  color: #5b7386;
+  line-height: 1.55;
 }
 
-.admin-chat-thread-card p {
+.contact-message-card p {
+  grid-column: 1 / -1;
   margin: 0;
-  color: #5d7385;
-  line-height: 1.5;
 }
 
-.admin-chat-window {
-  display: grid;
-  gap: 18px;
-  padding: 20px;
-  border: 1px solid rgba(31, 95, 145, 0.12);
-  border-radius: 22px;
-  background: #fff;
+.contact-message-card > span {
+  grid-column: 1 / -1;
 }
 
 .clinic-requests-panel {
@@ -2637,6 +2543,7 @@ textarea {
   .admin-kpis,
   .admin-toolbar,
   .admin-sample-filter-row,
+  .export-button-grid,
   .admin-record-list__head,
   .admin-record__summary {
     grid-template-columns: 1fr;
@@ -2646,7 +2553,6 @@ textarea {
   .customer-home__summary,
   .customer-contact-grid,
   .customer-contact-layout,
-  .admin-chat-layout,
   .clinic-request-row,
   .customer-steps,
   .review-grid,
@@ -2746,14 +2652,6 @@ textarea {
   .customer-wizard__actions {
     flex-direction: column;
     align-items: stretch;
-  }
-
-  .portal-chat-panel__header,
-  .admin-chat-window__header,
-  .portal-chat-compose {
-    grid-template-columns: 1fr;
-    align-items: stretch;
-    flex-direction: column;
   }
 
   .admin-login-page,

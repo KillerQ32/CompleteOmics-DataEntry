@@ -951,6 +951,37 @@ export async function reviewIncomingSampleAction(formData: FormData) {
   redirectWithPath(redirectPath, "message", decision === "reject" ? "Sample rejected." : "Sample accepted.");
 }
 
+export async function submitContactMessageAction(formData: FormData) {
+  const { profile, user } = await requireSessionProfile();
+  const redirectPath = getRedirectPath(formData, "/?customer_view=contact");
+  const email = getValue(formData, "email");
+  const message = getValue(formData, "message");
+
+  if (!email || !message) {
+    redirectWithPath(redirectPath, "error", "Email and message are required.");
+  }
+
+  const admin = createSupabaseAdminClient();
+  const { error } = await admin.from("contact_messages").insert({
+    user_id: user.id,
+    company_id: profile.company_id,
+    first_name: optionalValue(formData, "first_name"),
+    last_name: optionalValue(formData, "last_name"),
+    email,
+    institution: optionalValue(formData, "institution"),
+    purpose: optionalValue(formData, "purpose"),
+    source: optionalValue(formData, "source"),
+    message,
+  });
+
+  if (error) {
+    redirectWithPath(redirectPath, "error", error.message);
+  }
+
+  revalidatePath("/");
+  redirectWithPath(redirectPath, "message", "Your message was sent to Complete Omics.");
+}
+
 export async function uploadDocumentAction(formData: FormData) {
   const uploadCandidate = formData.get("document");
   const redirectPath = getRedirectPath(formData);

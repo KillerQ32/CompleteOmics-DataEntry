@@ -9,6 +9,7 @@ import {
   signInAction,
   signOutAction,
   signUpAction,
+  submitContactMessageAction,
   updateAccountApprovalAction,
   updateCustomerAccountAction,
   updateCompanyAction,
@@ -26,9 +27,9 @@ export const dynamic = "force-dynamic";
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 
-type CustomerView = "home" | "samples" | "intake" | "operations" | "account" | "contact" | "chat";
+type CustomerView = "home" | "samples" | "intake" | "operations" | "account" | "contact";
 type IntakeStep = "patient" | "sample" | "files" | "package" | "review";
-export type AdminPage = "overview" | "samples" | "intake" | "clinics" | "accounts" | "operations" | "messages";
+export type AdminPage = "overview" | "samples" | "intake" | "clinics" | "accounts" | "operations" | "contact";
 
 type CompanyRow = {
   id: string;
@@ -199,6 +200,22 @@ type ClinicRequestRow = {
   created_at: string;
 };
 
+type ContactMessageRow = {
+  id: string;
+  user_id: string | null;
+  company_id: string | null;
+  company_name: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  email: string;
+  institution: string | null;
+  purpose: string | null;
+  source: string | null;
+  message: string;
+  status: string;
+  created_at: string;
+};
+
 function readParam(searchParams: Record<string, string | string[] | undefined>, key: string) {
   const value = searchParams[key];
   return Array.isArray(value) ? value[0] : value ?? "";
@@ -215,8 +232,7 @@ function normalizeCustomerView(value: string): CustomerView {
     value === "intake" ||
     value === "operations" ||
     value === "account" ||
-    value === "contact" ||
-    value === "chat"
+    value === "contact"
   ) {
     return value;
   }
@@ -737,10 +753,6 @@ function CustomerWorkspace({
           <CustomerShellLink href="/?customer_view=operations" label="Documents" active={customerView === "operations"} />
           <CustomerShellLink href="/?customer_view=account" label="Account" active={customerView === "account"} />
           <CustomerShellLink href="/?customer_view=contact" label="Contact Us" active={customerView === "contact"} />
-          <span className="customer-site-link customer-site-link--disabled" aria-disabled="true">
-            Live Chat
-            <small>Coming Soon</small>
-          </span>
         </nav>
         <form action={signOutAction}>
           <button className="button button--secondary" type="submit">
@@ -1419,6 +1431,24 @@ function CustomerWorkspace({
                   </div>
                 </div>
               </article>
+
+              <article className="panel">
+                <h3>CSV Exports</h3>
+                <div className="export-button-grid">
+                  <a className="button button--secondary button--compact" href="/api/export?entity=samples">
+                    Sample Data
+                  </a>
+                  <a className="button button--secondary button--compact" href="/api/export?entity=patients">
+                    Patient Data
+                  </a>
+                  <a className="button button--secondary button--compact" href="/api/export?entity=clinics">
+                    Clinic Data
+                  </a>
+                  <a className="button button--secondary button--compact" href="/api/export?entity=fedex">
+                    FedEx Data
+                  </a>
+                </div>
+              </article>
             </div>
           </section>
         )}
@@ -1435,7 +1465,8 @@ function CustomerWorkspace({
             </div>
 
             <div className="customer-contact-layout">
-              <form className="panel form-panel customer-contact-form">
+              <form action={submitContactMessageAction} className="panel form-panel customer-contact-form">
+                <input type="hidden" name="redirect_to" value="/?customer_view=contact" />
                 <div className="form-grid">
                   <div className="field">
                     <label>First name</label>
@@ -1447,7 +1478,7 @@ function CustomerWorkspace({
                   </div>
                   <div className="field">
                     <label>Email</label>
-                    <input name="email" type="email" defaultValue={userEmail} placeholder="Enter here" />
+                    <input name="email" type="email" defaultValue={userEmail} placeholder="Enter here" required />
                   </div>
                   <div className="field">
                     <label>Institution</label>
@@ -1486,14 +1517,12 @@ function CustomerWorkspace({
                     name="message"
                     rows={6}
                     placeholder="Ask a question, request support, or message the Complete Omics team."
+                    required
                   />
                 </div>
-                <a
-                  className="button button--primary"
-                  href={`mailto:info@completeomics.com?subject=${encodeURIComponent("Complete Omics portal contact")}`}
-                >
-                  Send Message by Email
-                </a>
+                <button className="button button--primary" type="submit">
+                  Send Message
+                </button>
               </form>
 
               <aside className="customer-contact-info">
@@ -1521,44 +1550,6 @@ function CustomerWorkspace({
                 </article>
               </aside>
             </div>
-          </section>
-        )}
-
-        {customerView === "chat" && (
-          <section className="admin-panel customer-panel" id="customer-live-chat">
-            <div className="admin-panel__header">
-              <div>
-                <p className="eyebrow">Live Chat</p>
-                <h2>Message Complete Omics Admin</h2>
-              </div>
-              <span className="admin-panel__caption">UI preview for future realtime messaging.</span>
-            </div>
-
-            <section className="portal-chat-panel portal-chat-panel--standalone" aria-label="Portal live chat preview">
-              <div className="portal-chat-panel__header">
-                <div>
-                  <p className="eyebrow">Conversation</p>
-                  <h3>{company?.name ?? "Clinic"} Support Chat</h3>
-                </div>
-                <span>UI Preview</span>
-              </div>
-              <div className="portal-chat-thread">
-                <div className="portal-chat-message portal-chat-message--admin">
-                  <strong>Complete Omics Admin</strong>
-                  <p>Thanks for reaching out. Once realtime messaging is connected, admin replies will appear here.</p>
-                </div>
-                <div className="portal-chat-message portal-chat-message--customer">
-                  <strong>{profile?.first_name ?? "Customer"}</strong>
-                  <p>Your message will start a secure portal conversation with the admin team.</p>
-                </div>
-              </div>
-              <div className="portal-chat-compose">
-                <input placeholder="Type a message to admin" />
-                <button className="button button--primary" type="button">
-                  Send Message
-                </button>
-              </div>
-            </section>
           </section>
         )}
       </div>
@@ -1745,6 +1736,16 @@ export async function loadAdminWorkspaceData(
     );
   }
 
+  let contactMessagesQuery = admin
+    .from("contact_message_directory")
+    .select("id, user_id, company_id, company_name, first_name, last_name, email, institution, purpose, source, message, status, created_at")
+    .order("created_at", { ascending: false })
+    .limit(50);
+
+  if (!isUltimateAdmin && staffCompanyId) {
+    contactMessagesQuery = contactMessagesQuery.eq("company_id", staffCompanyId);
+  }
+
   let todaySamplesQuery = admin
     .from("admin_sample_directory")
     .select(
@@ -1785,6 +1786,7 @@ export async function loadAdminWorkspaceData(
     todaySamplesResult,
     todayPatientsResult,
     todayDocumentsResult,
+    contactMessagesResult,
     authUsersResult,
   ] =
     await Promise.all([
@@ -1819,6 +1821,7 @@ export async function loadAdminWorkspaceData(
       todaySamplesQuery,
       todayPatientsQuery,
       todayDocumentsQuery,
+      contactMessagesQuery,
       admin.auth.admin.listUsers({ page: 1, perPage: 200 }),
     ]);
 
@@ -1841,6 +1844,7 @@ export async function loadAdminWorkspaceData(
     todaySamples: (todaySamplesResult.data ?? []) as AdminSampleRow[],
     todayPatients: (todayPatientsResult.data ?? []) as PatientRow[],
     todayDocuments: (todayDocumentsResult.data ?? []) as DocumentRow[],
+    contactMessages: (contactMessagesResult.data ?? []) as ContactMessageRow[],
     message,
     error,
     q,
@@ -1880,6 +1884,7 @@ export function AdminWorkspace({
   todaySamples,
   todayPatients,
   todayDocuments,
+  contactMessages,
   message,
   error,
   q,
@@ -1917,6 +1922,7 @@ export function AdminWorkspace({
   todaySamples: AdminSampleRow[];
   todayPatients: PatientRow[];
   todayDocuments: DocumentRow[];
+  contactMessages: ContactMessageRow[];
   message: string;
   error: string;
   q: string;
@@ -2056,10 +2062,7 @@ export function AdminWorkspace({
           <a className={`admin-nav-item ${activePage === "clinics" ? "admin-nav-item--active" : ""}`} href="/admin/clinics">Clinics</a>
           <a className={`admin-nav-item ${activePage === "accounts" ? "admin-nav-item--active" : ""}`} href="/admin/accounts">Accounts</a>
           <a className={`admin-nav-item ${activePage === "operations" ? "admin-nav-item--active" : ""}`} href="/admin/documents">Documents</a>
-          <span className="admin-nav-item admin-nav-item--disabled" aria-disabled="true">
-            Inbox
-            <small>Coming Soon</small>
-          </span>
+          <a className={`admin-nav-item ${activePage === "contact" ? "admin-nav-item--active" : ""}`} href="/admin/contact">Contact Messages</a>
         </nav>
 
         <div className="admin-sidebar__meta">
@@ -2118,15 +2121,49 @@ export function AdminWorkspace({
         </section>
 
         <section className="admin-overview-grid">
+          <article className="panel admin-overview-card admin-export-card panel--wide">
+            <div className="panel__header">
+              <h3>CSV Exports</h3>
+            </div>
+            <div className="export-button-grid">
+              <a className="button button--secondary button--compact" href="/api/export?entity=samples">
+                Sample Data
+              </a>
+              <a className="button button--secondary button--compact" href="/api/export?entity=patients">
+                Patient Data
+              </a>
+              <a className="button button--secondary button--compact" href="/api/export?entity=clinics">
+                Clinic Data
+              </a>
+              <a className="button button--secondary button--compact" href="/api/export?entity=fedex">
+                FedEx Data
+              </a>
+            </div>
+          </article>
+
           <article className="panel admin-overview-card admin-overview-card--inbox">
             <div className="panel__header">
               <div>
-                <p className="eyebrow">Inbox</p>
-                <h3>Incoming messages</h3>
+                <h3>Contact Messages</h3>
               </div>
-              <span className="coming-soon-pill">Coming Soon</span>
+              <span className="admin-overview-count">{contactMessages.length}</span>
             </div>
-            <div className="empty-state">Live inbox messages will appear here once messaging is connected.</div>
+            <div className="list-grid">
+              {contactMessages.slice(0, 3).map((contactMessage) => (
+                <div className="list-row" key={contactMessage.id}>
+                  <strong>
+                    {[contactMessage.first_name, contactMessage.last_name].filter(Boolean).join(" ") ||
+                      contactMessage.email}
+                  </strong>
+                  <span>
+                    {contactMessage.purpose ?? "General message"}
+                    {" | "}
+                    {contactMessage.company_name ?? contactMessage.institution ?? "No clinic listed"}
+                  </span>
+                </div>
+              ))}
+              {contactMessages.length === 0 && <div className="empty-state">No contact messages yet.</div>}
+            </div>
           </article>
 
           <article className="panel admin-overview-card">
@@ -3353,61 +3390,37 @@ export function AdminWorkspace({
           </article>
         </section>}
 
-        {activePage === "messages" && <section className="admin-panel" id="admin-messages">
+        {activePage === "contact" && <section className="admin-panel" id="admin-contact-messages">
           <div className="admin-panel__header">
             <div>
-              <p className="eyebrow">Customer Messages</p>
-              <h2>Live chat inbox</h2>
+              <h2>Contact Messages</h2>
             </div>
-              <span className="admin-panel__caption">UI preview for future realtime messaging.</span>
+            <span className="admin-panel__caption">{contactMessages.length} messages</span>
           </div>
 
-          <div className="admin-chat-layout">
-            <aside className="admin-chat-inbox">
-              <article className="admin-chat-thread-card admin-chat-thread-card--active">
-                <span>New</span>
-                <strong>{companies[0]?.name ?? "Clinic customer"}</strong>
-                <p>Question about sample intake submission.</p>
-              </article>
-              <article className="admin-chat-thread-card">
-                <span>Open</span>
-                <strong>{companies[1]?.name ?? "Customer account"}</strong>
-                <p>Needs help uploading supporting documents.</p>
-              </article>
-              <article className="admin-chat-thread-card">
-                <span>Resolved</span>
-                <strong>{companies[2]?.name ?? "Clinic support"}</strong>
-                <p>FedEx package was attached to the wrong sample.</p>
-              </article>
-            </aside>
-
-            <section className="admin-chat-window">
-              <div className="admin-chat-window__header">
+          <div className="contact-message-list">
+            {contactMessages.map((contactMessage) => (
+              <article className="contact-message-card" key={contactMessage.id}>
                 <div>
-                  <p className="eyebrow">Active Conversation</p>
-                  <h3>{companies[0]?.name ?? "Clinic customer"}</h3>
+                  <strong>
+                    {[contactMessage.first_name, contactMessage.last_name].filter(Boolean).join(" ") ||
+                      contactMessage.email}
+                  </strong>
+                  <span>{contactMessage.email}</span>
                 </div>
-                <span>Realtime not connected</span>
-              </div>
-
-              <div className="portal-chat-thread">
-                <div className="portal-chat-message portal-chat-message--customer">
-                  <strong>Customer</strong>
-                  <p>Hi, I submitted a sample and wanted to confirm the files went through.</p>
+                <div>
+                  <strong>{contactMessage.purpose ?? "General message"}</strong>
+                  <span>{contactMessage.company_name ?? contactMessage.institution ?? "No clinic listed"}</span>
                 </div>
-                <div className="portal-chat-message portal-chat-message--admin">
-                  <strong>Admin</strong>
-                  <p>Thanks for checking. This admin chat UI is ready for the future message table integration.</p>
+                <div>
+                  <strong>{formatDateTime(contactMessage.created_at)}</strong>
+                  <span>{contactMessage.status}</span>
                 </div>
-              </div>
-
-              <div className="portal-chat-compose">
-                <input placeholder="Type an admin response" />
-                <button className="button button--primary" type="button">
-                  Send Reply
-                </button>
-              </div>
-            </section>
+                <p>{contactMessage.message}</p>
+                {contactMessage.source && <span>Source: {contactMessage.source}</span>}
+              </article>
+            ))}
+            {contactMessages.length === 0 && <div className="empty-state">No contact messages yet.</div>}
           </div>
         </section>}
       </div>
