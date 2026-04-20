@@ -181,12 +181,12 @@ export async function signInAction(formData: FormData) {
 
   if (loginScope === "admin" && !isStaff) {
     await supabase.auth.signOut();
-    redirectWithPath("/admin", "error", "Use the customer login for customer accounts.");
+    redirectWithPath("/admin", "error", "Incorrect login information.");
   }
 
   if (loginScope !== "admin" && isStaff) {
     await supabase.auth.signOut();
-    redirectWithPath("/", "error", "Use the admin login for admin accounts.");
+    redirectWithPath("/", "error", "Incorrect login information.");
   }
 
   if (loginScope !== "admin" && profile.account_status !== "approved") {
@@ -466,11 +466,12 @@ export async function bootstrapAdminAction(formData: FormData) {
   redirectWithPath(redirectPath, "message", "Admin account created. You are now signed in.");
 }
 
-export async function signOutAction() {
+export async function signOutAction(formData: FormData) {
   const supabase = await createSupabaseServerClient();
+  const redirectPath = getRedirectPath(formData);
   await supabase.auth.signOut();
   revalidatePath("/");
-  redirectWith("message", "Signed out.");
+  redirect(redirectPath);
 }
 
 export async function createCompanyAction(formData: FormData) {

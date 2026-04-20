@@ -27,9 +27,9 @@ export const dynamic = "force-dynamic";
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 
-type CustomerView = "home" | "samples" | "intake" | "operations" | "account" | "contact";
+type CustomerView = "home" | "samples" | "patients" | "packages" | "intake" | "operations" | "account" | "contact";
 type IntakeStep = "patient" | "sample" | "files" | "package" | "review";
-export type AdminPage = "overview" | "samples" | "intake" | "clinics" | "accounts" | "operations" | "contact";
+export type AdminPage = "overview" | "samples" | "patients" | "packages" | "intake" | "clinics" | "accounts" | "operations" | "contact";
 
 type CompanyRow = {
   id: string;
@@ -229,6 +229,8 @@ function readBooleanParam(searchParams: Record<string, string | string[] | undef
 function normalizeCustomerView(value: string): CustomerView {
   if (
     value === "samples" ||
+    value === "patients" ||
+    value === "packages" ||
     value === "intake" ||
     value === "operations" ||
     value === "account" ||
@@ -571,6 +573,13 @@ function CustomerWorkspace({
   collectedDateFilter,
   receivedDateFilter,
   packageFilter,
+  customerPackageIdFilter,
+  customerPackageMailedFilter,
+  customerPackageReceivedFilter,
+  customerPatientNameFilter,
+  customerPatientDobFilter,
+  customerPatientEmailFilter,
+  customerPatientPhoneFilter,
   customerView,
   intakeStep,
   patientDraft,
@@ -593,6 +602,13 @@ function CustomerWorkspace({
   collectedDateFilter: string;
   receivedDateFilter: string;
   packageFilter: string;
+  customerPackageIdFilter: string;
+  customerPackageMailedFilter: string;
+  customerPackageReceivedFilter: string;
+  customerPatientNameFilter: string;
+  customerPatientDobFilter: string;
+  customerPatientEmailFilter: string;
+  customerPatientPhoneFilter: string;
   customerView: CustomerView;
   intakeStep: IntakeStep;
   patientDraft: IntakePatientDraft;
@@ -714,6 +730,16 @@ function CustomerWorkspace({
             active={customerView === "samples"}
           />
           <CustomerShellLink
+            href="/?customer_view=patients"
+            label="Patients"
+            active={customerView === "patients"}
+          />
+          <CustomerShellLink
+            href="/?customer_view=packages"
+            label="Packages"
+            active={customerView === "packages"}
+          />
+          <CustomerShellLink
             href="/?customer_view=intake&intake_step=patient"
             label="Add Sample"
             active={customerView === "intake"}
@@ -749,6 +775,8 @@ function CustomerWorkspace({
         <nav className="customer-drawer__nav">
           <CustomerShellLink href="/?customer_view=home" label="Home" active={customerView === "home"} />
           <CustomerShellLink href="/?customer_view=samples" label="Clinic Samples" active={customerView === "samples"} />
+          <CustomerShellLink href="/?customer_view=patients" label="Patients" active={customerView === "patients"} />
+          <CustomerShellLink href="/?customer_view=packages" label="Packages" active={customerView === "packages"} />
           <CustomerShellLink href="/?customer_view=intake&intake_step=patient" label="Add Sample" active={customerView === "intake"} />
           <CustomerShellLink href="/?customer_view=operations" label="Documents" active={customerView === "operations"} />
           <CustomerShellLink href="/?customer_view=account" label="Account" active={customerView === "account"} />
@@ -766,12 +794,7 @@ function CustomerWorkspace({
           <section className="customer-site-hero customer-header" id="customer-overview">
             <div className="customer-site-hero__copy">
               <div>
-                <p className="eyebrow">Customer Portal</p>
                 <h1>{profile?.first_name ? `${profile.first_name}'s Workspace` : "Portal Workspace"}</h1>
-                <p>
-                  Submit patient and sample information directly into the Complete Omics database,
-                  then track files and FedEx packages from one secure clinic workspace.
-                </p>
               </div>
             </div>
 
@@ -806,24 +829,29 @@ function CustomerWorkspace({
           <section className="admin-panel customer-panel customer-home">
             <div className="admin-panel__header">
               <div>
-                <p className="eyebrow">Start Here</p>
                 <h2>Clinic workspace</h2>
               </div>
             </div>
 
             <div className="customer-home__actions">
               <a className="panel customer-action-card" href="/?customer_view=samples">
-                <p className="eyebrow">Review</p>
                 <h3>View clinic samples</h3>
                 <span>{samples.length} recent samples</span>
               </a>
+              <a className="panel customer-action-card" href="/?customer_view=patients">
+                <h3>View patients</h3>
+                <span>{patients.length} patient records</span>
+              </a>
+              <a className="panel customer-action-card" href="/?customer_view=packages">
+                <p className="eyebrow">FedEx</p>
+                <h3>View packages</h3>
+                <span>{packages.length} tracked packages</span>
+              </a>
               <a className="panel customer-action-card" href="/?customer_view=intake&intake_step=patient">
-                <p className="eyebrow">Intake</p>
                 <h3>Add a sample</h3>
                 <span>4 guided steps</span>
               </a>
               <a className="panel customer-action-card" href="/?customer_view=operations">
-                <p className="eyebrow">Documents</p>
                 <h3>Upload documents</h3>
                 <span>{documents.length} tracked files</span>
               </a>
@@ -857,9 +885,11 @@ function CustomerWorkspace({
         {customerView === "samples" && <section className="admin-panel customer-panel" id="customer-samples">
           <div className="admin-panel__header">
             <div>
-              <p className="eyebrow">Sample Search</p>
               <h2>Clinic samples</h2>
             </div>
+            <a className="button button--secondary button--compact" href="/api/export?entity=samples">
+              Export Samples CSV
+            </a>
           </div>
 
           <form className="table table--filters" method="get">
@@ -913,10 +943,123 @@ function CustomerWorkspace({
           </div>
         </section>}
 
+        {customerView === "patients" && <section className="admin-panel customer-panel" id="customer-patients">
+          <div className="admin-panel__header">
+            <div>
+              <h2>Patients</h2>
+            </div>
+            <a className="button button--secondary button--compact" href="/api/export?entity=patients">
+              Export Patients CSV
+            </a>
+          </div>
+
+          <form className="table table--filters table--patients" method="get">
+            <input type="hidden" name="customer_view" value="patients" />
+            <div className="table__head">
+              <span>Patient</span>
+              <span>Date of birth</span>
+              <span>Phone</span>
+              <span>Email</span>
+              <span>Location</span>
+              <span>Created</span>
+            </div>
+            <div className="table__filters">
+              <input name="patient_filter_name" defaultValue={customerPatientNameFilter} placeholder="Filter patient" />
+              <input name="patient_filter_dob" type="date" defaultValue={customerPatientDobFilter} />
+              <input name="patient_filter_phone" defaultValue={customerPatientPhoneFilter} placeholder="Filter phone" />
+              <input name="patient_filter_email" defaultValue={customerPatientEmailFilter} placeholder="Filter email" />
+              <span />
+              <span />
+            </div>
+            <div className="table__actions">
+              <button className="button button--secondary" type="submit">
+                Apply Filters
+              </button>
+              <a className="button button--ghost" href="/?customer_view=patients">
+                Clear
+              </a>
+            </div>
+          </form>
+
+          <div className="table table--patients">
+            <div className="table__head">
+              <span>Patient</span>
+              <span>Date of birth</span>
+              <span>Phone</span>
+              <span>Email</span>
+              <span>Location</span>
+              <span>Created</span>
+            </div>
+            {patients.map((patient) => (
+              <div className="table__row" key={patient.id}>
+                <span>{patient.first_name} {patient.last_name}</span>
+                <span>{formatDate(patient.date_of_birth)}</span>
+                <span>{patient.phone_number ?? "Not set"}</span>
+                <span>{patient.email_address ?? "Not set"}</span>
+                <span>{[patient.city, patient.state].filter(Boolean).join(", ") || "Not set"}</span>
+                <span>{formatDate(patient.created_at)}</span>
+              </div>
+            ))}
+            {patients.length === 0 && <div className="empty-state">No patients matched the selected filters.</div>}
+          </div>
+        </section>}
+
+        {customerView === "packages" && <section className="admin-panel customer-panel" id="customer-packages">
+          <div className="admin-panel__header">
+            <div>
+              <h2>Packages</h2>
+            </div>
+            <a className="button button--secondary button--compact" href="/api/export?entity=fedex">
+              Export FedEx CSV
+            </a>
+          </div>
+
+          <form className="table table--filters table--packages" method="get">
+            <input type="hidden" name="customer_view" value="packages" />
+            <div className="table__head">
+              <span>Package</span>
+              <span>Mailed</span>
+              <span>Received</span>
+              <span>Created</span>
+            </div>
+            <div className="table__filters">
+              <input name="package_filter_id" defaultValue={customerPackageIdFilter} placeholder="Filter package" />
+              <input name="package_filter_mailed" type="date" defaultValue={customerPackageMailedFilter} />
+              <input name="package_filter_received" type="date" defaultValue={customerPackageReceivedFilter} />
+              <span />
+            </div>
+            <div className="table__actions">
+              <button className="button button--secondary" type="submit">
+                Apply Filters
+              </button>
+              <a className="button button--ghost" href="/?customer_view=packages">
+                Clear
+              </a>
+            </div>
+          </form>
+
+          <div className="table table--packages">
+            <div className="table__head">
+              <span>Package</span>
+              <span>Mailed</span>
+              <span>Received</span>
+              <span>Created</span>
+            </div>
+            {packages.map((fedexPackage) => (
+              <div className="table__row" key={fedexPackage.id}>
+                <span>{fedexPackage.package_id}</span>
+                <span>{formatDate(fedexPackage.mailed_at)}</span>
+                <span>{formatDate(fedexPackage.received_at)}</span>
+                <span>{formatDate(fedexPackage.created_at)}</span>
+              </div>
+            ))}
+            {packages.length === 0 && <div className="empty-state">No packages matched the selected filters.</div>}
+          </div>
+        </section>}
+
         {customerView === "intake" && <section className="admin-panel customer-panel" id="customer-intake">
           <div className="admin-panel__header">
             <div>
-              <p className="eyebrow">Guided Intake</p>
               <h2>Add a sample</h2>
             </div>
           </div>
@@ -948,7 +1091,6 @@ function CustomerWorkspace({
             <form className="panel form-panel customer-wizard" method="get">
               <input type="hidden" name="customer_view" value="intake" />
               <input type="hidden" name="intake_step" value="sample" />
-              <p className="eyebrow">Step 1</p>
               <h3>Find an existing patient or create a new one</h3>
               <div className="field">
                 <label>Existing patient</label>
@@ -1048,7 +1190,6 @@ function CustomerWorkspace({
               <input type="hidden" name="height_inches" value={patientDraft.heightInches} />
               <input type="hidden" name="angioplasty_or_stent" value={patientDraft.angioplastyOrStent ? "true" : "false"} />
               <input type="hidden" name="cabg" value={patientDraft.cabg ? "true" : "false"} />
-              <p className="eyebrow">Step 2</p>
               <h3>Add sample details</h3>
               {!canAdvanceToSample && (
                 <div className="status-banner status-banner--error">
@@ -1123,7 +1264,6 @@ function CustomerWorkspace({
 
           {intakeStep === "files" && (
             <div className="panel form-panel customer-wizard">
-              <p className="eyebrow">Step 3</p>
               <h3>Documents are uploaded after the sample is created</h3>
               <p className="signup-helper-text">
                 To keep every document tied to the correct patient and sample, finish the sample intake first.
@@ -1171,7 +1311,6 @@ function CustomerWorkspace({
               ))}
               <input type="hidden" name="hart_cadhs" value={sampleDraft.hartCadhs ? "true" : "false"} />
               <input type="hidden" name="hart_cve" value={sampleDraft.hartCve ? "true" : "false"} />
-              <p className="eyebrow">Step 4</p>
               <h3>Find an existing FedEx package, create a new one, or skip this step</h3>
               {!canAdvanceToPackage && (
                 <div className="status-banner status-banner--error">
@@ -1242,7 +1381,6 @@ function CustomerWorkspace({
               <input type="hidden" name="package_id" value={packageDraft.packageId} />
               <input type="hidden" name="mailed_at" value={packageDraft.mailedAt} />
               <input type="hidden" name="skip_package" value={packageDraft.skipPackage ? "true" : "false"} />
-              <p className="eyebrow">Step 5</p>
               <h3>Review before submitting</h3>
               {!canAdvanceToPackage && (
                 <div className="status-banner status-banner--error">
@@ -1295,16 +1433,8 @@ function CustomerWorkspace({
         </section>}
 
         {customerView === "operations" && <section className="admin-panel customer-panel" id="customer-documents">
-          <div className="admin-panel__header">
-            <div>
-              <p className="eyebrow">Documents</p>
-              <h2>Patient and sample documents</h2>
-            </div>
-          </div>
-
           <div className="create-grid">
           <form action={uploadDocumentAction} className="panel form-panel">
-            <p className="eyebrow">Document Upload</p>
             <h3>Attach to patient and sample</h3>
             <div className="field">
               <label>Patient</label>
@@ -1338,26 +1468,10 @@ function CustomerWorkspace({
               Upload Document
             </button>
           </form>
-
-          <article className="panel">
-            <p className="eyebrow">Patients</p>
-            <h3>Recent records</h3>
-            <div className="list-grid">
-              {patients.map((patient) => (
-                <div className="list-row" key={patient.id}>
-                  <strong>{patient.first_name} {patient.last_name}</strong>
-                  <span>DOB {formatDate(patient.date_of_birth)}</span>
-                </div>
-              ))}
-              {patients.length === 0 && <div className="empty-state">No patients in scope yet.</div>}
-            </div>
-          </article>
           </div>
 
           <div className="data-grid">
           <article className="panel panel--wide">
-            <p className="eyebrow">Uploaded Documents</p>
-            <h3>Search by patient or sample</h3>
             <div className="list-grid">
               {documents.map((document) => (
                 <div className="list-row" key={document.id}>
@@ -1379,16 +1493,17 @@ function CustomerWorkspace({
           <section className="admin-panel customer-panel" id="customer-account">
             <div className="admin-panel__header">
               <div>
-                <p className="eyebrow">Account</p>
-                <h2>Account information</h2>
+                <h2>Account</h2>
               </div>
+              <a className="button button--secondary button--compact" href="/api/export?entity=clinics">
+                Export Clinic CSV
+              </a>
             </div>
 
             <div className="create-grid">
               <form action={updateCustomerAccountAction} className="panel form-panel">
                 <input type="hidden" name="redirect_to" value="/?customer_view=account" />
-                <p className="eyebrow">Profile</p>
-                <h3>Update your name</h3>
+                <h3>Profile</h3>
                 <div className="form-grid">
                   <div className="field">
                     <label>First name</label>
@@ -1413,9 +1528,12 @@ function CustomerWorkspace({
               </form>
 
               <article className="panel">
-                <p className="eyebrow">Clinic Details</p>
-                <h3>{company?.name ?? "Assigned clinic"}</h3>
+                <h3>Clinic Details</h3>
                 <div className="list-grid">
+                  <div className="list-row">
+                    <strong>Clinic</strong>
+                    <span>{company?.name ?? "Clinic not assigned"}</span>
+                  </div>
                   <div className="list-row">
                     <strong>Address</strong>
                     <span>
@@ -1431,24 +1549,6 @@ function CustomerWorkspace({
                   </div>
                 </div>
               </article>
-
-              <article className="panel">
-                <h3>CSV Exports</h3>
-                <div className="export-button-grid">
-                  <a className="button button--secondary button--compact" href="/api/export?entity=samples">
-                    Sample Data
-                  </a>
-                  <a className="button button--secondary button--compact" href="/api/export?entity=patients">
-                    Patient Data
-                  </a>
-                  <a className="button button--secondary button--compact" href="/api/export?entity=clinics">
-                    Clinic Data
-                  </a>
-                  <a className="button button--secondary button--compact" href="/api/export?entity=fedex">
-                    FedEx Data
-                  </a>
-                </div>
-              </article>
             </div>
           </section>
         )}
@@ -1456,12 +1556,7 @@ function CustomerWorkspace({
         {customerView === "contact" && (
           <section className="customer-contact-page customer-panel" id="customer-contact">
             <div className="customer-contact-hero">
-              <p className="eyebrow">Contact Us</p>
-              <h2>We are looking forward to hearing from YOU!</h2>
-              <p>
-                Send a question, request support, or reach out about Complete Omics services.
-                Your message can be routed to the right team by purpose.
-              </p>
+              <h2>Contact Us</h2>
             </div>
 
             <div className="customer-contact-layout">
@@ -1527,26 +1622,17 @@ function CustomerWorkspace({
 
               <aside className="customer-contact-info">
                 <article className="customer-contact-info__card">
-                  <p className="eyebrow">Have a Project?</p>
                   <h3>info@completeomics.com</h3>
-                  <a href="mailto:info@completeomics.com">Email us</a>
                 </article>
                 <article className="customer-contact-info__card">
-                  <p className="eyebrow">Office</p>
                   <h3>1448 South Rolling Rd</h3>
                   <span>Baltimore, MD 21227</span>
                 </article>
                 <article className="customer-contact-info__card">
-                  <p className="eyebrow">Phone</p>
                   <h3>+1 410 215 2760</h3>
-                  <a href="tel:+14102152760">Call Complete Omics</a>
                 </article>
                 <article className="customer-contact-info__card">
-                  <p className="eyebrow">Website</p>
                   <h3>completeomics.com</h3>
-                  <a href="https://www.completeomics.com/contact-us/" target="_blank" rel="noreferrer">
-                    Open public contact page
-                  </a>
                 </article>
               </aside>
             </div>
@@ -1576,6 +1662,14 @@ export async function loadAdminWorkspaceData(
   const adminHartCveFilter = readParam(resolvedSearchParams, "admin_hart_cve");
   const adminCollectedFilter = readParam(resolvedSearchParams, "admin_collected");
   const adminReceivedFilter = readParam(resolvedSearchParams, "admin_received");
+  const adminPatientNameFilter = readParam(resolvedSearchParams, "admin_patient_name");
+  const adminPatientClinicFilter = readParam(resolvedSearchParams, "admin_patient_clinic");
+  const adminPatientDobFilter = readParam(resolvedSearchParams, "admin_patient_dob");
+  const adminPatientEmailFilter = readParam(resolvedSearchParams, "admin_patient_email");
+  const adminPackageIdFilter = readParam(resolvedSearchParams, "admin_package_id");
+  const adminPackageClinicFilter = readParam(resolvedSearchParams, "admin_package_clinic");
+  const adminPackageMailedFilter = readParam(resolvedSearchParams, "admin_package_mailed");
+  const adminPackageReceivedFilter = readParam(resolvedSearchParams, "admin_package_received");
   const intakeStep = normalizeIntakeStep(readParam(resolvedSearchParams, "intake_step"));
   const adminIntakeCompanyId = readParam(resolvedSearchParams, "admin_intake_company_id");
   const patientDraft: IntakePatientDraft = {
@@ -1736,6 +1830,26 @@ export async function loadAdminWorkspaceData(
     );
   }
 
+  let patientQuery = admin
+    .from("patients")
+    .select("id, company_id, first_name, last_name, date_of_birth, address_line_1, city, state, postal_code, phone_number, email_address, race_ethnicity, weight_lbs, height_inches, angioplasty_or_stent, cabg, created_at")
+    .match(!isUltimateAdmin && staffCompanyId ? { company_id: staffCompanyId } : {})
+    .order("created_at", { ascending: false })
+    .limit(250);
+
+  if (adminPatientNameFilter) {
+    const safePatientName = adminPatientNameFilter.replace(/[,]/g, " ");
+    patientQuery = patientQuery.or(`first_name.ilike.%${safePatientName}%,last_name.ilike.%${safePatientName}%`);
+  }
+
+  if (adminPatientDobFilter) {
+    patientQuery = patientQuery.eq("date_of_birth", adminPatientDobFilter);
+  }
+
+  if (adminPatientEmailFilter) {
+    patientQuery = patientQuery.ilike("email_address", `%${adminPatientEmailFilter}%`);
+  }
+
   let contactMessagesQuery = admin
     .from("contact_message_directory")
     .select("id, user_id, company_id, company_name, first_name, last_name, email, institution, purpose, source, message, status, created_at")
@@ -1775,6 +1889,31 @@ export async function loadAdminWorkspaceData(
     todayDocumentsQuery = todayDocumentsQuery.eq("company_id", staffCompanyId);
   }
 
+  let packageQuery = admin
+    .from("fedex_packages")
+    .select("id, company_id, package_id, mailed_at, received_at, created_at")
+    .match(!isUltimateAdmin && staffCompanyId ? { company_id: staffCompanyId } : {})
+    .order("created_at", { ascending: false })
+    .limit(250);
+
+  if (adminPackageIdFilter) {
+    packageQuery = packageQuery.ilike("package_id", `%${adminPackageIdFilter}%`);
+  }
+
+  if (adminPackageMailedFilter) {
+    const nextMailedDate = nextDateString(adminPackageMailedFilter);
+    if (nextMailedDate) {
+      packageQuery = packageQuery.gte("mailed_at", adminPackageMailedFilter).lt("mailed_at", nextMailedDate);
+    }
+  }
+
+  if (adminPackageReceivedFilter) {
+    const nextReceivedDate = nextDateString(adminPackageReceivedFilter);
+    if (nextReceivedDate) {
+      packageQuery = packageQuery.gte("received_at", adminPackageReceivedFilter).lt("received_at", nextReceivedDate);
+    }
+  }
+
   const [
     companiesResult,
     clinicRequestsResult,
@@ -1805,18 +1944,8 @@ export async function loadAdminWorkspaceData(
         .match(!isUltimateAdmin && staffCompanyId ? { company_id: staffCompanyId } : {})
         .order("created_at", { ascending: false }),
       sampleQuery,
-      admin
-        .from("patients")
-        .select("id, company_id, first_name, last_name, date_of_birth, address_line_1, city, state, postal_code, phone_number, email_address, race_ethnicity, weight_lbs, height_inches, angioplasty_or_stent, cabg, created_at")
-        .match(!isUltimateAdmin && staffCompanyId ? { company_id: staffCompanyId } : {})
-        .order("created_at", { ascending: false })
-        .limit(10),
-      admin
-        .from("fedex_packages")
-        .select("id, company_id, package_id, mailed_at, received_at, created_at")
-        .match(!isUltimateAdmin && staffCompanyId ? { company_id: staffCompanyId } : {})
-        .order("created_at", { ascending: false })
-        .limit(10),
+      patientQuery,
+      packageQuery,
       documentQuery,
       todaySamplesQuery,
       todayPatientsQuery,
@@ -1828,6 +1957,25 @@ export async function loadAdminWorkspaceData(
   const userEmailById = new Map(
     (authUsersResult.data.users ?? []).map((authUser) => [authUser.id, authUser.email ?? "No email"]),
   );
+  const companyNameById = new Map(
+    ((companiesResult.data ?? []) as CompanyRow[]).map((company) => [company.id, company.name]),
+  );
+  const adminPatients = ((patientsResult.data ?? []) as PatientRow[]).filter((patient) => {
+    if (!adminPatientClinicFilter) {
+      return true;
+    }
+
+    const companyName = companyNameById.get(patient.company_id) ?? "";
+    return companyName.toLowerCase().includes(adminPatientClinicFilter.toLowerCase());
+  });
+  const adminPackages = ((packagesResult.data ?? []) as PackageRow[]).filter((fedexPackage) => {
+    if (!adminPackageClinicFilter) {
+      return true;
+    }
+
+    const companyName = companyNameById.get(fedexPackage.company_id) ?? "";
+    return companyName.toLowerCase().includes(adminPackageClinicFilter.toLowerCase());
+  });
 
   return {
     userEmail: user.email ?? "Unknown email",
@@ -1838,8 +1986,8 @@ export async function loadAdminWorkspaceData(
       isUltimateAdmin ? ["customer", "clinic_admin"].includes(account.role) : account.role === "customer",
     ),
     samples: (samplesResult.data ?? []) as AdminSampleRow[],
-    patients: (patientsResult.data ?? []) as PatientRow[],
-    packages: (packagesResult.data ?? []) as PackageRow[],
+    patients: adminPatients,
+    packages: adminPackages,
     documents: (documentsResult.data ?? []) as DocumentRow[],
     todaySamples: (todaySamplesResult.data ?? []) as AdminSampleRow[],
     todayPatients: (todayPatientsResult.data ?? []) as PatientRow[],
@@ -1861,6 +2009,14 @@ export async function loadAdminWorkspaceData(
     adminHartCveFilter,
     adminCollectedFilter,
     adminReceivedFilter,
+    adminPatientNameFilter,
+    adminPatientClinicFilter,
+    adminPatientDobFilter,
+    adminPatientEmailFilter,
+    adminPackageIdFilter,
+    adminPackageClinicFilter,
+    adminPackageMailedFilter,
+    adminPackageReceivedFilter,
     isUltimateAdmin,
     userEmailById,
     intakeStep,
@@ -1901,6 +2057,14 @@ export function AdminWorkspace({
   adminHartCveFilter,
   adminCollectedFilter,
   adminReceivedFilter,
+  adminPatientNameFilter,
+  adminPatientClinicFilter,
+  adminPatientDobFilter,
+  adminPatientEmailFilter,
+  adminPackageIdFilter,
+  adminPackageClinicFilter,
+  adminPackageMailedFilter,
+  adminPackageReceivedFilter,
   isUltimateAdmin,
   userEmailById,
   intakeStep,
@@ -1939,6 +2103,14 @@ export function AdminWorkspace({
   adminHartCveFilter: string;
   adminCollectedFilter: string;
   adminReceivedFilter: string;
+  adminPatientNameFilter: string;
+  adminPatientClinicFilter: string;
+  adminPatientDobFilter: string;
+  adminPatientEmailFilter: string;
+  adminPackageIdFilter: string;
+  adminPackageClinicFilter: string;
+  adminPackageMailedFilter: string;
+  adminPackageReceivedFilter: string;
   isUltimateAdmin: boolean;
   userEmailById: Map<string, string>;
   intakeStep: IntakeStep;
@@ -1958,6 +2130,7 @@ export function AdminWorkspace({
   const canAdvanceAdminToPackage = canAdvanceAdminToFiles;
   const pendingClinicRequests = clinicRequests.filter((request) => request.status === "pending");
   const incomingSamples = samples.filter((sample) => !sample.rejected);
+  const companyNameById = new Map(companies.map((company) => [company.id, company.name]));
   const adminPatientStepHref = buildPath("/admin/intake", { intake_step: "patient" });
   const adminSampleStepHref = buildPath("/admin/intake", {
     intake_step: "sample",
@@ -2058,6 +2231,8 @@ export function AdminWorkspace({
         <nav className="admin-sidebar__nav">
           <a className={`admin-nav-item ${activePage === "overview" ? "admin-nav-item--active" : ""}`} href="/admin/overview">Overview</a>
           <a className={`admin-nav-item ${activePage === "samples" ? "admin-nav-item--active" : ""}`} href="/admin/samples">Sample Data</a>
+          <a className={`admin-nav-item ${activePage === "patients" ? "admin-nav-item--active" : ""}`} href="/admin/patients">Patients</a>
+          <a className={`admin-nav-item ${activePage === "packages" ? "admin-nav-item--active" : ""}`} href="/admin/packages">Packages</a>
           <a className={`admin-nav-item ${activePage === "intake" ? "admin-nav-item--active" : ""}`} href="/admin/intake">Create Records</a>
           <a className={`admin-nav-item ${activePage === "clinics" ? "admin-nav-item--active" : ""}`} href="/admin/clinics">Clinics</a>
           <a className={`admin-nav-item ${activePage === "accounts" ? "admin-nav-item--active" : ""}`} href="/admin/accounts">Accounts</a>
@@ -2069,6 +2244,7 @@ export function AdminWorkspace({
           <p className="eyebrow">Signed In</p>
           <strong>{userEmail}</strong>
           <form action={signOutAction}>
+            <input type="hidden" name="redirect_to" value="/admin" />
             <button className="button button--ghost" type="submit">
               Sign Out
             </button>
@@ -2121,26 +2297,6 @@ export function AdminWorkspace({
         </section>
 
         <section className="admin-overview-grid">
-          <article className="panel admin-overview-card admin-export-card panel--wide">
-            <div className="panel__header">
-              <h3>CSV Exports</h3>
-            </div>
-            <div className="export-button-grid">
-              <a className="button button--secondary button--compact" href="/api/export?entity=samples">
-                Sample Data
-              </a>
-              <a className="button button--secondary button--compact" href="/api/export?entity=patients">
-                Patient Data
-              </a>
-              <a className="button button--secondary button--compact" href="/api/export?entity=clinics">
-                Clinic Data
-              </a>
-              <a className="button button--secondary button--compact" href="/api/export?entity=fedex">
-                FedEx Data
-              </a>
-            </div>
-          </article>
-
           <article className="panel admin-overview-card admin-overview-card--inbox">
             <div className="panel__header">
               <div>
@@ -2193,8 +2349,7 @@ export function AdminWorkspace({
           <article className="panel admin-overview-card panel--wide">
             <div className="panel__header">
               <div>
-                <p className="eyebrow">Daily Activity</p>
-                <h3>Created today</h3>
+                <h3>Daily Activity</h3>
               </div>
               <span className="admin-overview-count">
                 {todaySamples.length + todayPatients.length + todayDocuments.length}
@@ -2260,14 +2415,303 @@ export function AdminWorkspace({
         </section>
         </>}
 
+        {activePage === "patients" && <section className="admin-panel" id="admin-patients">
+          <div className="admin-panel__header">
+            <div>
+              <h2>Patients</h2>
+            </div>
+            <a className="button button--secondary button--compact" href="/api/export?entity=patients">
+              Export Patients CSV
+            </a>
+          </div>
+
+          <details className="admin-sample-column-filters">
+            <summary>Filter Patients</summary>
+            <form className="admin-sample-filter-panel" method="get">
+              <div className="admin-patient-filter-row">
+                <input name="admin_patient_name" defaultValue={adminPatientNameFilter} placeholder="Patient" />
+                <input name="admin_patient_clinic" defaultValue={adminPatientClinicFilter} placeholder="Clinic" />
+                <input name="admin_patient_dob" type="date" defaultValue={adminPatientDobFilter} />
+                <input name="admin_patient_email" defaultValue={adminPatientEmailFilter} placeholder="Email" />
+              </div>
+              <div className="admin-sample-filter-actions">
+                <button className="button button--secondary button--compact" type="submit">
+                  Apply Filters
+                </button>
+                <a className="button button--ghost button--compact" href="/admin/patients">
+                  Clear
+                </a>
+              </div>
+            </form>
+          </details>
+
+          <div className="admin-record-list admin-record-list--patients">
+            <div className="admin-record-list__head">
+              <span>Patient</span>
+              <span>Clinic</span>
+              <span>Date of birth</span>
+              <span>Contact</span>
+              <span>Location</span>
+              <span>Weight</span>
+              <span>Height</span>
+              <span>Clinical</span>
+              <span>{isUltimateAdmin ? "" : "Created"}</span>
+            </div>
+            {patients.map((patient) => (
+              <details className="admin-record" key={patient.id}>
+                <summary className="admin-record__summary">
+                  <div>
+                    <strong>{patient.first_name} {patient.last_name}</strong>
+                  </div>
+                  <div>
+                    <strong>{companyNameById.get(patient.company_id) ?? "Clinic not found"}</strong>
+                  </div>
+                  <div>
+                    <strong>{formatDate(patient.date_of_birth)}</strong>
+                  </div>
+                  <div>
+                    <strong>{patient.phone_number ?? "Not set"}</strong>
+                    <span>{patient.email_address ?? "Email not set"}</span>
+                  </div>
+                  <div>
+                    <strong>{[patient.city, patient.state].filter(Boolean).join(", ") || "Not set"}</strong>
+                    <span>{patient.postal_code ?? "Zip not set"}</span>
+                  </div>
+                  <div>
+                    <strong>{patient.weight_lbs ? `${patient.weight_lbs} lbs` : "Not set"}</strong>
+                  </div>
+                  <div>
+                    <strong>{patient.height_inches ? `${patient.height_inches} in` : "Not set"}</strong>
+                  </div>
+                  <div>
+                    <strong>{patient.angioplasty_or_stent ? "Stent: Yes" : "Stent: No"}</strong>
+                    <span>{patient.cabg ? "CABG: Yes" : "CABG: No"}</span>
+                  </div>
+                  <div className="admin-record__actions">
+                    {isUltimateAdmin ? (
+                      <span className="admin-record__toggle">Edit</span>
+                    ) : (
+                      <strong>{formatDate(patient.created_at)}</strong>
+                    )}
+                  </div>
+                </summary>
+
+                {isUltimateAdmin && (
+                  <form action={updatePatientAction} className="admin-record__details">
+                    <input type="hidden" name="id" value={patient.id} />
+                    <input type="hidden" name="redirect_to" value="/admin/patients" />
+                    <div className="form-grid form-grid--compact">
+                      <div className="field field--compact">
+                        <label>Clinic</label>
+                        <select name="company_id" defaultValue={patient.company_id} required>
+                          {companies.map((company) => (
+                            <option key={company.id} value={company.id}>
+                              {company.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="field field--compact">
+                        <label>First name</label>
+                        <input name="first_name" defaultValue={patient.first_name} required />
+                      </div>
+                      <div className="field field--compact">
+                        <label>Last name</label>
+                        <input name="last_name" defaultValue={patient.last_name} required />
+                      </div>
+                      <div className="field field--compact">
+                        <label>Date of birth</label>
+                        <input name="date_of_birth" type="date" defaultValue={patient.date_of_birth} required />
+                      </div>
+                      <div className="field field--compact">
+                        <label>Street address</label>
+                        <input name="address_line_1" defaultValue={patient.address_line_1 ?? ""} />
+                      </div>
+                      <div className="field field--compact">
+                        <label>City</label>
+                        <input name="city" defaultValue={patient.city ?? ""} />
+                      </div>
+                      <div className="field field--compact">
+                        <label>State</label>
+                        <input name="state" defaultValue={patient.state ?? ""} maxLength={2} />
+                      </div>
+                      <div className="field field--compact">
+                        <label>Zip code</label>
+                        <input name="postal_code" defaultValue={patient.postal_code ?? ""} />
+                      </div>
+                      <div className="field field--compact">
+                        <label>Phone number</label>
+                        <input name="phone_number" defaultValue={patient.phone_number ?? ""} />
+                      </div>
+                      <div className="field field--compact">
+                        <label>Email address</label>
+                        <input name="email_address" type="email" defaultValue={patient.email_address ?? ""} />
+                      </div>
+                      <div className="field field--compact">
+                        <label>Race / ethnicity</label>
+                        <input name="race_ethnicity" defaultValue={patient.race_ethnicity ?? ""} />
+                      </div>
+                      <div className="field field--compact">
+                        <label>Weight (lbs)</label>
+                        <input name="weight_lbs" type="number" step="0.01" defaultValue={patient.weight_lbs ?? ""} />
+                      </div>
+                      <div className="field field--compact">
+                        <label>Height (inches)</label>
+                        <input name="height_inches" type="number" step="0.01" defaultValue={patient.height_inches ?? ""} />
+                      </div>
+                    </div>
+                    <div className="checkbox-row">
+                      <label><input name="angioplasty_or_stent" type="checkbox" defaultChecked={patient.angioplasty_or_stent} /> Angioplasty or Stent</label>
+                      <label><input name="cabg" type="checkbox" defaultChecked={patient.cabg} /> Coronary Artery Bypass Graft (CABG)</label>
+                    </div>
+                    <div className="admin-record__details-actions">
+                      <button className="button button--primary button--compact" type="submit">
+                        Save Patient
+                      </button>
+                    </div>
+                  </form>
+                )}
+              </details>
+            ))}
+            {patients.length === 0 && <div className="empty-state">No patients matched the selected filters.</div>}
+          </div>
+        </section>}
+
+        {activePage === "packages" && <section className="admin-panel" id="admin-packages">
+          <div className="admin-panel__header">
+            <div>
+              <h2>Packages</h2>
+            </div>
+            <a className="button button--secondary button--compact" href="/api/export?entity=fedex">
+              Export FedEx CSV
+            </a>
+          </div>
+
+          <details className="admin-sample-column-filters">
+            <summary>Filter Packages</summary>
+            <form className="admin-sample-filter-panel" method="get">
+              <div className="admin-package-filter-row">
+                <input name="admin_package_id" defaultValue={adminPackageIdFilter} placeholder="Package" />
+                {isUltimateAdmin ? (
+                  <input name="admin_package_clinic" defaultValue={adminPackageClinicFilter} placeholder="Clinic" />
+                ) : (
+                  <span />
+                )}
+                <input name="admin_package_mailed" type="date" defaultValue={adminPackageMailedFilter} />
+                <input name="admin_package_received" type="date" defaultValue={adminPackageReceivedFilter} />
+              </div>
+              <div className="admin-sample-filter-actions">
+                <button className="button button--secondary button--compact" type="submit">
+                  Apply Filters
+                </button>
+                <a className="button button--ghost button--compact" href="/admin/packages">
+                  Clear
+                </a>
+              </div>
+            </form>
+          </details>
+
+          <div className="admin-record-list admin-record-list--packages">
+            <div className="admin-record-list__head">
+              <span>Package</span>
+              <span>Clinic</span>
+              <span>Mailed</span>
+              <span>Received</span>
+              <span>Created</span>
+              <span></span>
+            </div>
+            {packages.map((fedexPackage) => (
+              <details className="admin-record" key={fedexPackage.id}>
+                <summary className="admin-record__summary">
+                  <div>
+                    <strong>{fedexPackage.package_id}</strong>
+                  </div>
+                  <div>
+                    <strong>{companyNameById.get(fedexPackage.company_id) ?? "Clinic not found"}</strong>
+                  </div>
+                  <div>
+                    <strong>{formatDate(fedexPackage.mailed_at)}</strong>
+                  </div>
+                  <div>
+                    <strong>{formatDate(fedexPackage.received_at)}</strong>
+                  </div>
+                  <div>
+                    <strong>{formatDate(fedexPackage.created_at)}</strong>
+                  </div>
+                  <div className="admin-record__actions">
+                    {isUltimateAdmin ? (
+                      <span className="admin-record__toggle">Edit</span>
+                    ) : (
+                      <span className="admin-record__toggle admin-record__toggle--muted">View</span>
+                    )}
+                  </div>
+                </summary>
+
+                {isUltimateAdmin ? (
+                  <form action={updatePackageAction} className="admin-record__details">
+                    <input type="hidden" name="id" value={fedexPackage.id} />
+                    <input type="hidden" name="redirect_to" value="/admin/packages" />
+                    <div className="form-grid form-grid--compact">
+                      <div className="field field--compact">
+                        <label>Clinic</label>
+                        <select name="company_id" defaultValue={fedexPackage.company_id} required>
+                          {companies.map((company) => (
+                            <option key={company.id} value={company.id}>
+                              {company.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="field field--compact">
+                        <label>Package ID</label>
+                        <input name="package_id" defaultValue={fedexPackage.package_id} required />
+                      </div>
+                      <div className="field field--compact">
+                        <label>Mailed at</label>
+                        <input name="mailed_at" type="datetime-local" defaultValue={toDateTimeLocal(fedexPackage.mailed_at)} />
+                      </div>
+                      <div className="field field--compact">
+                        <label>Received at</label>
+                        <input name="received_at" type="datetime-local" defaultValue={toDateTimeLocal(fedexPackage.received_at)} />
+                      </div>
+                    </div>
+                    <div className="admin-record__details-actions">
+                      <button className="button button--primary button--compact" type="submit">
+                        Save Package
+                      </button>
+                    </div>
+                  </form>
+                ) : (
+                  <div className="admin-record__details">
+                    <div className="list-grid">
+                      <div className="list-row">
+                        <strong>{fedexPackage.package_id}</strong>
+                        <span>
+                          Mailed {formatDate(fedexPackage.mailed_at)} | Received {formatDate(fedexPackage.received_at)}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </details>
+            ))}
+            {packages.length === 0 && <div className="empty-state">No packages matched the selected filters.</div>}
+          </div>
+        </section>}
+
         {activePage === "samples" && <section className="admin-panel" id="admin-samples">
           <div className="admin-panel__header">
             <div>
               <h2>Samples</h2>
             </div>
-            <a className="button button--primary button--compact" href="/admin/intake?intake_step=patient">
-              Add Sample
-            </a>
+            <div className="admin-panel__actions">
+              <a className="button button--secondary button--compact" href="/api/export?entity=samples">
+                Export Samples CSV
+              </a>
+              <a className="button button--primary button--compact" href="/admin/intake?intake_step=patient">
+                Add Sample
+              </a>
+            </div>
           </div>
 
           <article className="panel incoming-samples-panel">
@@ -2544,7 +2988,6 @@ export function AdminWorkspace({
           </div>
 
           <section className="panel form-panel customer-wizard">
-            <p className="eyebrow">Guided Sample Intake</p>
             <h3>Add sample</h3>
             <div className="customer-steps">
               <div className={`customer-step ${intakeStep === "patient" ? "customer-step--active" : ""}`}>
@@ -2753,7 +3196,6 @@ export function AdminWorkspace({
 
             {intakeStep === "files" && (
               <div>
-                <p className="eyebrow">Step 3</p>
                 <h3>Upload files before FedEx details</h3>
                 {adminPatientChosen ? (
                   <form action={uploadDocumentAction}>
@@ -2825,7 +3267,6 @@ export function AdminWorkspace({
                 ))}
                 <input type="hidden" name="hart_cadhs" value={sampleDraft.hartCadhs ? "true" : "false"} />
                 <input type="hidden" name="hart_cve" value={sampleDraft.hartCve ? "true" : "false"} />
-                <p className="eyebrow">Step 4</p>
                 <h3>Find an existing FedEx package, create a new one, or skip this step</h3>
                 {!canAdvanceAdminToPackage && (
                   <div className="status-banner status-banner--error">
@@ -3015,15 +3456,13 @@ export function AdminWorkspace({
         {activePage === "accounts" && <section className="admin-panel" id="admin-accounts">
           <div className="admin-panel__header">
             <div>
-              <p className="eyebrow">Accounts</p>
               <h2>Accounts</h2>
             </div>
           </div>
 
           <div className="data-grid">
           <article className="panel panel--wide">
-            <p className="eyebrow">User Profiles</p>
-            <h3>Customer and clinic admin access</h3>
+            <h3>User Profiles</h3>
             <div className="admin-record-list admin-record-list--accounts">
               <div className="admin-record-list__head">
                 <span>Email</span>
@@ -3157,6 +3596,9 @@ export function AdminWorkspace({
             <div>
               <h2>Clinics</h2>
             </div>
+            <a className="button button--secondary button--compact" href="/api/export?entity=clinics">
+              Export Clinics CSV
+            </a>
           </div>
 
           {isUltimateAdmin && <article className="panel clinic-requests-panel">
@@ -3307,16 +3749,8 @@ export function AdminWorkspace({
         </section>}
 
         {activePage === "operations" && <section className="admin-panel" id="admin-documents">
-          <div className="admin-panel__header">
-            <div>
-              <p className="eyebrow">Documents</p>
-              <h2>Patient and sample documents</h2>
-            </div>
-          </div>
-
           <article className="panel panel--wide document-directory-panel">
-            <p className="eyebrow">Document Directory</p>
-            <h3>Search patient or sample documents</h3>
+            <h3>Document Directory</h3>
             <form className="search-form" method="get">
               <input name="document_q" defaultValue={documentSearch} placeholder="Search patient, sample number, or file name" />
               <button className="button button--secondary" type="submit">
@@ -3347,7 +3781,6 @@ export function AdminWorkspace({
               <form action={uploadDocumentAction} className="document-add-form">
                 <input type="hidden" name="redirect_to" value="/admin/documents" />
                 <div className="document-add-form__header">
-                  <p className="eyebrow">Add Document</p>
                   <h3>Attach to patient and sample</h3>
                 </div>
                 <div className="form-grid">
@@ -3439,6 +3872,13 @@ export default async function Home({ searchParams }: { searchParams: SearchParam
   const collectedDateFilter = readParam(resolvedSearchParams, "sample_filter_collected");
   const receivedDateFilter = readParam(resolvedSearchParams, "sample_filter_received");
   const packageFilter = readParam(resolvedSearchParams, "sample_filter_package");
+  const customerPackageIdFilter = readParam(resolvedSearchParams, "package_filter_id");
+  const customerPackageMailedFilter = readParam(resolvedSearchParams, "package_filter_mailed");
+  const customerPackageReceivedFilter = readParam(resolvedSearchParams, "package_filter_received");
+  const customerPatientNameFilter = readParam(resolvedSearchParams, "patient_filter_name");
+  const customerPatientDobFilter = readParam(resolvedSearchParams, "patient_filter_dob");
+  const customerPatientEmailFilter = readParam(resolvedSearchParams, "patient_filter_email");
+  const customerPatientPhoneFilter = readParam(resolvedSearchParams, "patient_filter_phone");
   const companyFilter = readParam(resolvedSearchParams, "company_id");
   const statusFilter = readParam(resolvedSearchParams, "status");
   const rejectedFilter = readParam(resolvedSearchParams, "rejected");
@@ -3558,19 +3998,58 @@ export default async function Home({ searchParams }: { searchParams: SearchParam
     }
   }
 
+  let patientQuery = supabase
+    .from("patients")
+    .select("id, company_id, first_name, last_name, date_of_birth, address_line_1, city, state, postal_code, phone_number, email_address, race_ethnicity, weight_lbs, height_inches, angioplasty_or_stent, cabg, created_at")
+    .order("created_at", { ascending: false })
+    .limit(250);
+
+  if (customerPatientNameFilter) {
+    const safePatientName = customerPatientNameFilter.replace(/[,]/g, " ");
+    patientQuery = patientQuery.or(`first_name.ilike.%${safePatientName}%,last_name.ilike.%${safePatientName}%`);
+  }
+
+  if (customerPatientDobFilter) {
+    patientQuery = patientQuery.eq("date_of_birth", customerPatientDobFilter);
+  }
+
+  if (customerPatientEmailFilter) {
+    patientQuery = patientQuery.ilike("email_address", `%${customerPatientEmailFilter}%`);
+  }
+
+  if (customerPatientPhoneFilter) {
+    patientQuery = patientQuery.ilike("phone_number", `%${customerPatientPhoneFilter}%`);
+  }
+
+  let packageQuery = supabase
+    .from("fedex_packages")
+    .select("id, company_id, package_id, mailed_at, received_at, created_at")
+    .order("created_at", { ascending: false })
+    .limit(250);
+
+  if (customerPackageIdFilter) {
+    packageQuery = packageQuery.ilike("package_id", `%${customerPackageIdFilter}%`);
+  }
+
+  if (customerPackageMailedFilter) {
+    const nextMailedDate = nextDateString(customerPackageMailedFilter);
+    if (nextMailedDate) {
+      packageQuery = packageQuery.gte("mailed_at", customerPackageMailedFilter).lt("mailed_at", nextMailedDate);
+    }
+  }
+
+  if (customerPackageReceivedFilter) {
+    const nextReceivedDate = nextDateString(customerPackageReceivedFilter);
+    if (nextReceivedDate) {
+      packageQuery = packageQuery.gte("received_at", customerPackageReceivedFilter).lt("received_at", nextReceivedDate);
+    }
+  }
+
   const [companyResult, samplesResult, patientsResult, packagesResult, documentsResult] = await Promise.all([
     companyPromise,
     sampleQuery,
-    supabase
-      .from("patients")
-      .select("id, company_id, first_name, last_name, date_of_birth, address_line_1, city, state, postal_code, phone_number, email_address, race_ethnicity, weight_lbs, height_inches, angioplasty_or_stent, cabg, created_at")
-      .order("created_at", { ascending: false })
-      .limit(6),
-    supabase
-      .from("fedex_packages")
-      .select("id, company_id, package_id, mailed_at, received_at, created_at")
-      .order("created_at", { ascending: false })
-      .limit(6),
+    patientQuery,
+    packageQuery,
     supabase
       .from("document_directory")
       .select("id, company_id, company_name, patient_id, patient_first_name, patient_last_name, sample_id, sample_number, original_filename, storage_path, created_at")
@@ -3596,6 +4075,13 @@ export default async function Home({ searchParams }: { searchParams: SearchParam
       collectedDateFilter={collectedDateFilter}
       receivedDateFilter={receivedDateFilter}
       packageFilter={packageFilter}
+      customerPackageIdFilter={customerPackageIdFilter}
+      customerPackageMailedFilter={customerPackageMailedFilter}
+      customerPackageReceivedFilter={customerPackageReceivedFilter}
+      customerPatientNameFilter={customerPatientNameFilter}
+      customerPatientDobFilter={customerPatientDobFilter}
+      customerPatientEmailFilter={customerPatientEmailFilter}
+      customerPatientPhoneFilter={customerPatientPhoneFilter}
       customerView={customerView}
       intakeStep={intakeStep}
       patientDraft={patientDraft}

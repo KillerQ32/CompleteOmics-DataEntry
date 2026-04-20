@@ -59,7 +59,7 @@ export default async function AdminEntryPage({ searchParams }: { searchParams: S
           <h1>Admin Portal</h1>
 
           <a className="admin-login-panel__link admin-login-panel__link--brand" href="/">
-            Back to customer portal
+            <span aria-hidden="true">←</span> Customer Login
           </a>
         </aside>
 

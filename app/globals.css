@@ -62,6 +62,65 @@ textarea {
   background: rgba(2, 11, 22, 0.62);
 }
 
+input[type="date"],
+input[type="datetime-local"] {
+  min-height: 54px;
+  padding-right: 52px;
+  color: #17324a;
+  background:
+    linear-gradient(90deg, transparent calc(100% - 52px), rgba(214, 17, 36, 0.08) calc(100% - 52px)),
+    #fff;
+  border-color: rgba(214, 17, 36, 0.2);
+  color-scheme: light;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+input[type="date"]:focus,
+input[type="datetime-local"]:focus {
+  border-color: rgba(214, 17, 36, 0.46);
+  box-shadow: 0 0 0 4px rgba(214, 17, 36, 0.09);
+  outline: none;
+}
+
+input[type="date"]::-webkit-datetime-edit,
+input[type="datetime-local"]::-webkit-datetime-edit {
+  color: #17324a;
+}
+
+input[type="date"].date-input--empty::-webkit-datetime-edit,
+input[type="datetime-local"].date-input--empty::-webkit-datetime-edit {
+  color: #9aabba;
+  font-weight: 600;
+}
+
+input[type="date"].date-input--empty,
+input[type="datetime-local"].date-input--empty {
+  color: #9aabba;
+}
+
+input[type="date"]::-webkit-datetime-edit-fields-wrapper,
+input[type="datetime-local"]::-webkit-datetime-edit-fields-wrapper {
+  padding: 0;
+}
+
+input[type="date"]::-webkit-calendar-picker-indicator,
+input[type="datetime-local"]::-webkit-calendar-picker-indicator {
+  width: 20px;
+  height: 20px;
+  margin-right: -38px;
+  padding: 10px;
+  border-radius: 999px;
+  background-color: rgba(214, 17, 36, 0.12);
+  cursor: pointer;
+  opacity: 1;
+}
+
+input[type="date"]::-webkit-calendar-picker-indicator:hover,
+input[type="datetime-local"]::-webkit-calendar-picker-indicator:hover {
+  background-color: rgba(214, 17, 36, 0.2);
+}
+
 textarea {
   resize: vertical;
 }
@@ -984,6 +1043,13 @@ textarea {
   margin-bottom: 18px;
 }
 
+.admin-panel__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
 .admin-toolbar {
   display: grid;
   grid-template-columns: minmax(280px, 1.5fr) repeat(3, minmax(170px, 0.8fr)) auto;
@@ -1096,8 +1162,24 @@ textarea {
   align-items: center;
 }
 
+.admin-patient-filter-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  align-items: center;
+}
+
+.admin-package-filter-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  align-items: center;
+}
+
 .admin-sample-filter-row input,
-.admin-sample-filter-row select {
+.admin-sample-filter-row select,
+.admin-patient-filter-row input,
+.admin-package-filter-row input {
   min-width: 0;
   padding: 9px 10px;
   border-radius: 12px;
@@ -1174,6 +1256,38 @@ textarea {
 
 .incoming-sample-card__actions .button {
   min-width: 68px;
+}
+
+.admin-record-list--patients .admin-record-list__head,
+.admin-record-list--patients .admin-record__summary {
+  grid-template-columns: minmax(130px, 1fr) minmax(135px, 1fr) minmax(104px, 0.72fr) minmax(150px, 1fr) minmax(130px, 0.92fr) minmax(86px, 0.58fr) minmax(86px, 0.58fr) minmax(116px, 0.8fr) 82px;
+  gap: 10px;
+}
+
+.admin-record-list--patients .admin-record__summary strong {
+  font-size: 0.92rem;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.admin-record-list--patients .admin-record__actions {
+  justify-items: center;
+}
+
+.admin-record-list--packages .admin-record-list__head,
+.admin-record-list--packages .admin-record__summary {
+  grid-template-columns: minmax(150px, 1.1fr) minmax(190px, 1.15fr) minmax(120px, 0.85fr) minmax(120px, 0.85fr) minmax(120px, 0.85fr) 86px;
+  gap: 12px;
+}
+
+.admin-record-list--packages .admin-record__summary strong {
+  font-size: 0.92rem;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.admin-record-list--packages .admin-record__actions {
+  justify-items: center;
 }
 
 .admin-record-list--accounts .admin-record-list__head,
@@ -1261,6 +1375,11 @@ textarea {
 
 .admin-record[open] .admin-record__toggle {
   background: rgba(31, 95, 145, 0.12);
+}
+
+.admin-record__toggle--muted {
+  color: #5d7385;
+  background: rgba(93, 115, 133, 0.08);
 }
 
 .admin-record__details-actions {
@@ -2185,7 +2304,7 @@ textarea {
 }
 
 .customer-home__actions {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   margin-bottom: 18px;
 }
 
@@ -2392,6 +2511,7 @@ textarea {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
   gap: 18px;
+  margin-top: 18px;
   margin-bottom: 24px;
 }
 
@@ -2437,6 +2557,10 @@ textarea {
 
 .customer-wizard {
   max-width: 1120px;
+}
+
+.customer-wizard h3 {
+  margin-bottom: 0;
 }
 
 .wizard-divider {
@@ -2559,6 +2683,7 @@ textarea {
   .admin-kpis,
   .admin-toolbar,
   .admin-sample-filter-row,
+  .admin-patient-filter-row,
   .export-button-grid,
   .admin-record-list__head,
   .admin-record__summary {
