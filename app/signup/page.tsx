@@ -121,6 +121,10 @@ export default async function SignupPage({ searchParams }: { searchParams: Searc
                   <CompanyOptions companies={companies} />
                 </select>
               </div>
+              <div className="field">
+                <label>Notes</label>
+                <textarea name="notes" rows={3} placeholder="Anything the admin should know?" />
+              </div>
               <a className="customer-login-panel__link" href="/signup?request_clinic=true">
                 Don&apos;t see your clinic? Request to add it.
               </a>

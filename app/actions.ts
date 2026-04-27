@@ -52,6 +52,38 @@ function normalizeFloatInput(value: string | null) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function normalizeSampleStatusInput(value: string | null) {
+  switch (value) {
+    case "mailed":
+    case "accepted":
+    case "rejected":
+    case "submitted":
+      return value;
+    case "draft":
+      return "submitted";
+    case "received":
+    case "ready_for_review":
+    case "awaiting_documentation":
+      return "accepted";
+    default:
+      return "submitted";
+  }
+}
+
+function ensureReviewDecisionAllowed(
+  status: string,
+  receivedAt: string | null,
+  redirectPath: string,
+): void {
+  if ((status === "accepted" || status === "rejected") && !receivedAt) {
+    redirectWithPath(
+      redirectPath,
+      "error",
+      "A sample must be marked received before it can be accepted or rejected.",
+    );
+  }
+}
+
 function normalizeIcd10CodesFromForm(formData: FormData) {
   const explicitCodes = Array.from({ length: 5 }, (_, index) =>
     getValue(formData, `icd10_code_${index + 1}`),
@@ -119,16 +151,6 @@ async function requireAdminSession() {
   return session;
 }
 
-async function requireStaffSession() {
-  const session = await requireSessionProfile();
-
-  if (session.profile.role !== "admin" && session.profile.role !== "clinic_admin") {
-    redirectWith("error", "Admin access is required for that action.");
-  }
-
-  return session;
-}
-
 function resolveCompanyId(profile: SessionProfile, formData: FormData) {
   if (profile.role === "admin") {
     const companyId = parseLookupValue(optionalValue(formData, "company_id"));
@@ -177,7 +199,7 @@ export async function signInAction(formData: FormData) {
     redirectWithPath(redirectPath, "error", profileError?.message ?? "Your user profile could not be loaded.");
   }
 
-  const isStaff = profile.role === "admin" || profile.role === "clinic_admin";
+  const isStaff = profile.role === "admin";
 
   if (loginScope === "admin" && !isStaff) {
     await supabase.auth.signOut();
@@ -206,6 +228,7 @@ export async function signUpAction(formData: FormData) {
   const firstName = getValue(formData, "first_name");
   const lastName = getValue(formData, "last_name");
   const companyId = getValue(formData, "company_id");
+  const notes = optionalValue(formData, "notes");
 
   if (!companyId) {
     redirectWithPath(redirectPath, "error", "Choose an approved clinic before creating a customer account.");
@@ -247,6 +270,7 @@ export async function signUpAction(formData: FormData) {
     company_id: companyId,
     first_name: firstName,
     last_name: lastName,
+    notes,
     role: "customer",
     account_status: "pending",
   });
@@ -256,7 +280,7 @@ export async function signUpAction(formData: FormData) {
   }
 
   revalidatePath("/");
-  redirectWithPath(redirectPath, "message", "Account created and sent for clinic approval.");
+  redirectWithPath(redirectPath, "message", "Account created and sent for admin approval.");
 }
 
 export async function requestClinicAction(formData: FormData) {
@@ -295,13 +319,21 @@ export async function approveClinicRequestAction(formData: FormData) {
   const { data: request, error: requestError } = await admin
     .from("clinic_requests")
     .select(
-      "id, clinic_name, address_line_1, city, state, postal_code, contact_email, contact_phone, fax_number, requester_first_name, requester_last_name, requester_email",
+      "id, clinic_name, address_line_1, city, state, postal_code, contact_email, contact_phone, fax_number, requester_first_name, requester_last_name, requester_email, status",
     )
     .eq("id", requestId)
     .single();
 
   if (requestError || !request) {
     redirectWithPath(redirectPath, "error", requestError?.message ?? "Clinic request could not be found.");
+  }
+
+  if (request.status === "approved") {
+    redirectWithPath(redirectPath, "message", "This clinic request is already approved and linked to a customer account.");
+  }
+
+  if (request.status === "rejected") {
+    redirectWithPath(redirectPath, "error", "This clinic request was already rejected.");
   }
 
   const { data: company, error: companyError } = await admin
@@ -356,7 +388,7 @@ export async function approveClinicRequestAction(formData: FormData) {
     company_id: company.id,
     first_name: request.requester_first_name,
     last_name: request.requester_last_name,
-    role: "clinic_admin",
+    role: "customer",
     account_status: "approved",
   });
 
@@ -376,7 +408,7 @@ export async function approveClinicRequestAction(formData: FormData) {
   revalidatePath("/");
   revalidatePath("/admin/clinics");
   revalidatePath("/admin/accounts");
-  redirectWithPath(redirectPath, "message", "Clinic approved and requester assigned as clinic admin.");
+  redirectWithPath(redirectPath, "message", "Clinic approved and requester assigned as a customer account.");
 }
 
 export async function denyClinicRequestAction(formData: FormData) {
@@ -540,7 +572,7 @@ export async function updateUserProfileAction(formData: FormData) {
   }
 
   if (nextRole !== "admin" && !nextCompanyId) {
-    redirectWithPath(redirectPath, "error", "Clinic admins and customer accounts must be attached to an approved clinic.");
+    redirectWithPath(redirectPath, "error", "Customer accounts must be attached to an approved clinic.");
   }
 
   const { error } = await admin
@@ -563,7 +595,7 @@ export async function updateUserProfileAction(formData: FormData) {
 }
 
 export async function updateAccountApprovalAction(formData: FormData) {
-  const { profile } = await requireStaffSession();
+  await requireAdminSession();
   const admin = createSupabaseAdminClient();
   const profileId = getValue(formData, "id");
   const nextStatus = getValue(formData, "account_status");
@@ -581,12 +613,6 @@ export async function updateAccountApprovalAction(formData: FormData) {
 
   if (targetError || !targetProfile) {
     redirectWithPath(redirectPath, "error", targetError?.message ?? "User profile could not be found.");
-  }
-
-  if (profile.role === "clinic_admin") {
-    if (targetProfile.role !== "customer" || targetProfile.company_id !== profile.company_id) {
-      redirectWithPath(redirectPath, "error", "Clinic admins can only approve or deny customer accounts for their clinic.");
-    }
   }
 
   const { error } = await admin
@@ -749,6 +775,13 @@ export async function createSampleAction(formData: FormData) {
 
   const admin = profile.role === "admin" ? createSupabaseAdminClient() : null;
   const supabase = admin ?? (await createSupabaseServerClient());
+  const receivedAt = normalizeDateInput(optionalValue(formData, "received_at"));
+  const status =
+    profile.role === "admin"
+      ? normalizeSampleStatusInput(getValue(formData, "status"))
+      : "submitted";
+
+  ensureReviewDecisionAllowed(status, receivedAt, redirectPath);
 
   const { error } = await supabase.from("samples").insert({
     company_id: companyId,
@@ -756,7 +789,7 @@ export async function createSampleAction(formData: FormData) {
     patient_id: parseLookupValue(getValue(formData, "patient_id")),
     fedex_package_id: parseLookupValue(optionalValue(formData, "fedex_package_id")),
     collected_at: normalizeDateInput(optionalValue(formData, "collected_at")),
-    received_at: normalizeDateInput(optionalValue(formData, "received_at")),
+    received_at: receivedAt,
     collected_by: optionalValue(formData, "collected_by"),
     missing_info: optionalValue(formData, "missing_info"),
     sex: optionalValue(formData, "sex"),
@@ -765,7 +798,8 @@ export async function createSampleAction(formData: FormData) {
     hart_cve: formData.has("hart_cve"),
     icd10_codes: normalizeIcd10CodesFromForm(formData),
     npi_number: optionalValue(formData, "npi_number"),
-    status: profile.role === "admin" ? getValue(formData, "status") || "submitted" : "submitted",
+    status,
+    rejected: status === "rejected",
   });
 
   if (error) {
@@ -783,6 +817,14 @@ export async function createCustomerIntakeAction(formData: FormData) {
 
   const admin = profile.role === "admin" ? createSupabaseAdminClient() : null;
   const supabase = admin ?? (await createSupabaseServerClient());
+  const status =
+    profile.role === "admin"
+      ? normalizeSampleStatusInput(getValue(formData, "status"))
+      : "submitted";
+  const receivedAt =
+    profile.role === "admin" ? normalizeDateInput(optionalValue(formData, "received_at")) : null;
+
+  ensureReviewDecisionAllowed(status, receivedAt, redirectPath);
 
   let patientId = parseLookupValue(optionalValue(formData, "patient_id"));
 
@@ -860,7 +902,7 @@ export async function createCustomerIntakeAction(formData: FormData) {
     patient_id: patientId,
     fedex_package_id: fedexPackageId,
     collected_at: normalizeDateInput(optionalValue(formData, "collected_at")),
-    received_at: profile.role === "admin" ? normalizeDateInput(optionalValue(formData, "received_at")) : null,
+    received_at: receivedAt,
     collected_by: optionalValue(formData, "collected_by"),
     missing_info: optionalValue(formData, "missing_info"),
     sex: optionalValue(formData, "sex"),
@@ -869,7 +911,8 @@ export async function createCustomerIntakeAction(formData: FormData) {
     hart_cve: formData.has("hart_cve") || getValue(formData, "hart_cve") === "true",
     icd10_codes: normalizeIcd10CodesFromForm(formData),
     npi_number: optionalValue(formData, "npi_number"),
-    status: profile.role === "admin" ? getValue(formData, "status") || "submitted" : "submitted",
+    status,
+    rejected: status === "rejected",
   });
 
   if (error) {
@@ -884,8 +927,13 @@ export async function updateSampleAction(formData: FormData) {
   await requireAdminSession();
   const admin = createSupabaseAdminClient();
   const sampleId = getValue(formData, "id");
-  const rejected = getValue(formData, "rejected") === "true";
+  const requestedStatus = normalizeSampleStatusInput(getValue(formData, "status"));
+  const rejected = requestedStatus === "rejected" || getValue(formData, "rejected") === "true";
+  const status = rejected ? "rejected" : requestedStatus;
   const redirectPath = getRedirectPath(formData, "/admin/samples");
+  const receivedAt = normalizeDateInput(optionalValue(formData, "received_at"));
+
+  ensureReviewDecisionAllowed(status, receivedAt, redirectPath);
 
   const { error } = await admin
     .from("samples")
@@ -894,8 +942,8 @@ export async function updateSampleAction(formData: FormData) {
       company_id: parseLookupValue(getValue(formData, "company_id")),
       patient_id: parseLookupValue(getValue(formData, "patient_id")),
       fedex_package_id: parseLookupValue(optionalValue(formData, "fedex_package_id")),
-      status: getValue(formData, "status"),
-      received_at: normalizeDateInput(optionalValue(formData, "received_at")),
+      status,
+      received_at: receivedAt,
       collected_at: normalizeDateInput(optionalValue(formData, "collected_at")),
       collected_by: optionalValue(formData, "collected_by"),
       sex: optionalValue(formData, "sex"),
@@ -927,6 +975,24 @@ export async function reviewIncomingSampleAction(formData: FormData) {
   const decision = getValue(formData, "decision");
   const redirectPath = getRedirectPath(formData, "/admin/samples");
 
+  const { data: sample, error: sampleError } = await admin
+    .from("samples")
+    .select("received_at")
+    .eq("id", sampleId)
+    .single();
+
+  if (sampleError || !sample) {
+    redirectWithPath(redirectPath, "error", sampleError?.message ?? "Sample could not be found.");
+  }
+
+  if (!sample.received_at) {
+    redirectWithPath(
+      redirectPath,
+      "error",
+      "A sample must be marked received before it can be accepted or rejected.",
+    );
+  }
+
   const update =
     decision === "reject"
       ? {
@@ -936,7 +1002,7 @@ export async function reviewIncomingSampleAction(formData: FormData) {
         }
       : {
           rejected: false,
-          status: "ready_for_review",
+          status: "accepted",
           rejection_reason: null,
           rejected_at: null,
           rejected_by: null,

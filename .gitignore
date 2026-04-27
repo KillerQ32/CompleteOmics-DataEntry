@@ -1,4 +1,5 @@
 node_modules
 .next
+.test-dist
 tsconfig.tsbuildinfo
 .env.local
