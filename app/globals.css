@@ -1712,6 +1712,12 @@ textarea {
 .list-row__actions {
   display: flex;
   justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 0;
+}
+
+.list-row__actions form {
   margin: 0;
 }
 

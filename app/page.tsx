@@ -439,6 +439,21 @@ function PackageOptions({ packages }: { packages: PackageRow[] }) {
   );
 }
 
+function SampleOptions({ samples }: { samples: Array<Pick<AdminSampleRow, "id" | "sample_number">> }) {
+  return (
+    <>
+      <option value="" disabled>
+        Select a sample
+      </option>
+      {samples.map((sample) => (
+        <option key={sample.id} value={sample.id}>
+          {sample.sample_number}
+        </option>
+      ))}
+    </>
+  );
+}
+
 function PackageLookupOptions({ packages }: { packages: PackageRow[] }) {
   return (
     <>
@@ -1105,31 +1120,15 @@ function CustomerWorkspace({
                       </div>
                       <div className="field field--compact">
                         <label>Patient</label>
-                        <input
-                          name="patient_id"
-                          list={`customer-sample-patient-options-${sample.id}`}
-                          defaultValue={`${formatSamplePatientName(sample)} | ${sample.patient_id}`}
-                          required
-                        />
-                        <datalist id={`customer-sample-patient-options-${sample.id}`}>
-                          <PatientLookupOptions patients={patients} />
-                        </datalist>
+                        <select name="patient_id" defaultValue={sample.patient_id} required>
+                          <PatientOptions patients={patients} />
+                        </select>
                       </div>
                       <div className="field field--compact">
                         <label>Package</label>
-                        <input
-                          name="fedex_package_id"
-                          list={`customer-sample-package-options-${sample.id}`}
-                          defaultValue={
-                            sample.fedex_package_id && sample.package_id
-                              ? `${sample.package_id} | ${sample.fedex_package_id}`
-                              : ""
-                          }
-                          placeholder="Type package ID"
-                        />
-                        <datalist id={`customer-sample-package-options-${sample.id}`}>
-                          <PackageLookupOptions packages={packages} />
-                        </datalist>
+                        <select name="fedex_package_id" defaultValue={sample.fedex_package_id ?? ""}>
+                          <PackageOptions packages={packages} />
+                        </select>
                       </div>
                       <div className="field field--compact">
                         <label>Status</label>
@@ -1862,27 +1861,15 @@ function CustomerWorkspace({
             <h3>Attach to patient and sample</h3>
             <div className="field">
               <label>Patient</label>
-              <input
-                name="patient_id"
-                list="customer-upload-patient-options"
-                placeholder="Type patient name"
-                required
-              />
-              <datalist id="customer-upload-patient-options">
-                <PatientLookupOptions patients={patients} />
-              </datalist>
+              <select name="patient_id" defaultValue="" required>
+                <PatientOptions patients={patients} />
+              </select>
             </div>
             <div className="field">
               <label>Sample</label>
-              <input
-                name="sample_id"
-                list="customer-upload-sample-options"
-                placeholder="Type sample number"
-                required
-              />
-              <datalist id="customer-upload-sample-options">
-                <SampleLookupOptions samples={samples} />
-              </datalist>
+              <select name="sample_id" defaultValue="" required>
+                <SampleOptions samples={samples} />
+              </select>
             </div>
             <div className="field">
               <label>File</label>
@@ -1930,27 +1917,15 @@ function CustomerWorkspace({
                     <div className="form-grid form-grid--compact">
                       <div className="field field--compact">
                         <label>Patient</label>
-                        <input
-                          name="patient_id"
-                          list={`customer-document-patient-options-${document.id}`}
-                          defaultValue={`${[document.patient_first_name, document.patient_last_name].filter(Boolean).join(" ")} | ${document.patient_id}`}
-                          required
-                        />
-                        <datalist id={`customer-document-patient-options-${document.id}`}>
-                          <PatientLookupOptions patients={patients} />
-                        </datalist>
+                        <select name="patient_id" defaultValue={document.patient_id} required>
+                          <PatientOptions patients={patients} />
+                        </select>
                       </div>
                       <div className="field field--compact">
                         <label>Sample</label>
-                        <input
-                          name="sample_id"
-                          list={`customer-document-sample-options-${document.id}`}
-                          defaultValue={document.sample_number ? `${document.sample_number} | ${document.sample_id}` : ""}
-                          required
-                        />
-                        <datalist id={`customer-document-sample-options-${document.id}`}>
-                          <SampleLookupOptions samples={samples} />
-                        </datalist>
+                        <select name="sample_id" defaultValue={document.sample_id} required>
+                          <SampleOptions samples={samples} />
+                        </select>
                       </div>
                       <div className="field field--compact">
                         <label>File</label>
@@ -1958,6 +1933,20 @@ function CustomerWorkspace({
                       </div>
                     </div>
                     <div className="admin-record__details-actions">
+                      <a
+                        className="button button--ghost button--compact"
+                        href={`/documents/${document.id}`}
+                        rel="noreferrer"
+                        target="_blank"
+                      >
+                        View
+                      </a>
+                      <a
+                        className="button button--ghost button--compact"
+                        href={`/documents/${document.id}?download=1`}
+                      >
+                        Download
+                      </a>
                       <button
                         className="button button--danger button--compact"
                         type="submit"
@@ -3507,41 +3496,21 @@ export function AdminWorkspace({
                     </div>
                     <div className="field field--compact">
                       <label>Clinic</label>
-                      <input
-                        name="company_id"
-                        list={`sample-company-options-${sample.id}`}
-                        defaultValue={`${sample.company_name} | ${sample.company_id}`}
-                      />
-                      <datalist id={`sample-company-options-${sample.id}`}>
-                        <CompanyLookupOptions companies={companies} />
-                      </datalist>
+                      <select name="company_id" defaultValue={sample.company_id} required>
+                        <CompanyOptions companies={companies} />
+                      </select>
                     </div>
                     <div className="field field--compact">
                       <label>Patient</label>
-                      <input
-                        name="patient_id"
-                        list={`sample-patient-options-${sample.id}`}
-                        defaultValue={`${sample.patient_first_name} ${sample.patient_last_name} | ${sample.patient_id}`}
-                      />
-                      <datalist id={`sample-patient-options-${sample.id}`}>
-                        <PatientLookupOptions patients={patients} />
-                      </datalist>
+                      <select name="patient_id" defaultValue={sample.patient_id} required>
+                        <PatientOptions patients={patients} />
+                      </select>
                     </div>
                     <div className="field field--compact">
                       <label>FedEx package</label>
-                      <input
-                        name="fedex_package_id"
-                        list={`sample-package-options-${sample.id}`}
-                        defaultValue={
-                          sample.fedex_package_id && sample.package_id
-                            ? `${sample.package_id} | ${sample.fedex_package_id}`
-                            : ""
-                        }
-                        placeholder="Type package ID"
-                      />
-                      <datalist id={`sample-package-options-${sample.id}`}>
-                        <PackageLookupOptions packages={packages} />
-                      </datalist>
+                      <select name="fedex_package_id" defaultValue={sample.fedex_package_id ?? ""}>
+                        <PackageOptions packages={packages} />
+                      </select>
                     </div>
                     <div className="field field--compact">
                       <label>Status</label>
@@ -4230,13 +4199,29 @@ export function AdminWorkspace({
                       {document.company_name}
                     </span>
                   </div>
-                  <form action={deleteDocumentAction} className="list-row__actions">
-                    <input type="hidden" name="id" value={document.id} />
-                    <input type="hidden" name="redirect_to" value="/admin/documents" />
-                    <button className="button button--danger button--compact" type="submit">
-                      Delete
-                    </button>
-                  </form>
+                  <div className="list-row__actions">
+                    <a
+                      className="button button--ghost button--compact"
+                      href={`/documents/${document.id}`}
+                      rel="noreferrer"
+                      target="_blank"
+                    >
+                      View
+                    </a>
+                    <a
+                      className="button button--ghost button--compact"
+                      href={`/documents/${document.id}?download=1`}
+                    >
+                      Download
+                    </a>
+                    <form action={deleteDocumentAction}>
+                      <input type="hidden" name="id" value={document.id} />
+                      <input type="hidden" name="redirect_to" value="/admin/documents" />
+                      <button className="button button--danger button--compact" type="submit">
+                        Delete
+                      </button>
+                    </form>
+                  </div>
                 </div>
               ))}
               {documents.length === 0 && <div className="empty-state">No documents found.</div>}
@@ -4260,19 +4245,15 @@ export function AdminWorkspace({
                   )}
                   <div className="field">
                     <label>Patient</label>
-                    <input name="patient_id" list="admin-document-patient-options" placeholder="Type patient name" required />
-                    <datalist id="admin-document-patient-options">
-                      <PatientLookupOptions patients={patients} />
-                    </datalist>
+                    <select name="patient_id" defaultValue="" required>
+                      <PatientOptions patients={patients} />
+                    </select>
                   </div>
                   <div className="field">
                     <label>Sample</label>
-                    <input name="sample_id" list="admin-document-sample-options" placeholder="Type sample number" required />
-                    <datalist id="admin-document-sample-options">
-                      {samples.map((sample) => (
-                        <option key={sample.id} value={`${sample.sample_number} | ${sample.id}`} />
-                      ))}
-                    </datalist>
+                    <select name="sample_id" defaultValue="" required>
+                      <SampleOptions samples={samples} />
+                    </select>
                   </div>
                   <div className="field">
                     <label>File</label>
