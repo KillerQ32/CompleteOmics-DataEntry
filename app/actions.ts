@@ -2,6 +2,12 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import {
+  exceedsIcd10CodeLimit,
+  isSampleReviewDecisionAllowed,
+  normalizeIcd10Codes,
+  normalizeSampleStatus,
+} from "../lib/sample-workflow";
 import { createSupabaseAdminClient } from "../lib/supabase/admin";
 import { createSupabaseServerClient } from "../lib/supabase/server";
 
@@ -9,7 +15,14 @@ type SessionProfile = {
   id: string;
   role: "admin" | "clinic_admin" | "customer";
   company_id: string | null;
+  first_name: string | null;
+  last_name: string | null;
 };
+
+function getProfileDisplayName(profile: Pick<SessionProfile, "first_name" | "last_name">) {
+  const parts = [profile.first_name?.trim(), profile.last_name?.trim()].filter(Boolean);
+  return parts.length > 0 ? parts.join(" ") : null;
+}
 
 function getValue(formData: FormData, key: string) {
   const value = formData.get(key);
@@ -19,6 +32,21 @@ function getValue(formData: FormData, key: string) {
 function optionalValue(formData: FormData, key: string) {
   const value = getValue(formData, key);
   return value.length > 0 ? value : null;
+}
+
+async function findAuthUserByEmail(email: string) {
+  const admin = createSupabaseAdminClient();
+  const normalizedEmail = email.trim().toLowerCase();
+  const { data, error } = await admin.auth.admin.listUsers({
+    page: 1,
+    perPage: 1000,
+  });
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return data.users.find((authUser) => authUser.email?.toLowerCase() === normalizedEmail) ?? null;
 }
 
 function parseLookupValue(value: string | null) {
@@ -52,22 +80,40 @@ function normalizeFloatInput(value: string | null) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function normalizeSampleStatusInput(value: string | null) {
-  switch (value) {
-    case "mailed":
-    case "accepted":
-    case "rejected":
-    case "submitted":
-      return value;
-    case "draft":
-      return "submitted";
-    case "received":
-    case "ready_for_review":
-    case "awaiting_documentation":
-      return "accepted";
-    default:
-      return "submitted";
+function normalizeSexInput(value: string | null) {
+  if (!value) {
+    return null;
   }
+
+  switch (value.trim().toLowerCase()) {
+    case "m":
+    case "male":
+      return "Male";
+    case "f":
+    case "female":
+      return "Female";
+    default:
+      return value.trim();
+  }
+}
+
+function requireAssignedCompanyId(profile: SessionProfile, redirectPath: string) {
+  if (!profile.company_id) {
+    redirectWithPath(redirectPath, "error", "Your user profile is missing a clinic assignment.");
+  }
+
+  return profile.company_id;
+}
+
+function normalizeCustomerEditableSampleStatus(currentStatus: string, requestedStatus: string) {
+  const normalizedCurrentStatus = normalizeSampleStatus(currentStatus);
+  const normalizedRequestedStatus = normalizeSampleStatus(requestedStatus || currentStatus);
+
+  if (normalizedCurrentStatus === "accepted" || normalizedCurrentStatus === "rejected") {
+    return normalizedCurrentStatus;
+  }
+
+  return normalizedRequestedStatus === "mailed" ? "mailed" : "submitted";
 }
 
 function ensureReviewDecisionAllowed(
@@ -75,7 +121,7 @@ function ensureReviewDecisionAllowed(
   receivedAt: string | null,
   redirectPath: string,
 ): void {
-  if ((status === "accepted" || status === "rejected") && !receivedAt) {
+  if (!isSampleReviewDecisionAllowed(status, receivedAt)) {
     redirectWithPath(
       redirectPath,
       "error",
@@ -85,19 +131,12 @@ function ensureReviewDecisionAllowed(
 }
 
 function normalizeIcd10CodesFromForm(formData: FormData) {
-  const explicitCodes = Array.from({ length: 5 }, (_, index) =>
-    getValue(formData, `icd10_code_${index + 1}`),
-  ).filter(Boolean);
+  const codes = normalizeIcd10Codes(
+    Array.from({ length: 5 }, (_, index) => getValue(formData, `icd10_code_${index + 1}`)),
+    optionalValue(formData, "icd10_codes"),
+  );
 
-  const codes =
-    explicitCodes.length > 0
-      ? explicitCodes
-      : (optionalValue(formData, "icd10_codes") ?? "")
-          .split(/[\n,;]+/)
-          .map((code) => code.trim())
-          .filter(Boolean);
-
-  if (codes.length > 5) {
+  if (exceedsIcd10CodeLimit(codes)) {
     redirectWith("error", "ICD10 Codes can contain up to 5 codes.");
   }
 
@@ -107,6 +146,68 @@ function normalizeIcd10CodesFromForm(formData: FormData) {
 function getRedirectPath(formData: FormData, fallback = "/") {
   const redirectTo = getValue(formData, "redirect_to");
   return redirectTo.startsWith("/") ? redirectTo : fallback;
+}
+
+async function finalizePendingIntakeDocuments({
+  client,
+  companyId,
+  userId,
+  draftKey,
+  patientId,
+  sampleId,
+}: {
+  client: Awaited<ReturnType<typeof createSupabaseServerClient>> | ReturnType<typeof createSupabaseAdminClient>;
+  companyId: string;
+  userId: string;
+  draftKey: string | null;
+  patientId: string;
+  sampleId: string;
+}) {
+  if (!draftKey) {
+    return;
+  }
+
+  const { data: pendingDocuments, error: pendingDocumentsError } = await client
+    .from("pending_intake_documents")
+    .select("id, storage_path, original_filename, mime_type")
+    .eq("company_id", companyId)
+    .eq("user_id", userId)
+    .eq("draft_key", draftKey)
+    .order("created_at", { ascending: true });
+
+  if (pendingDocumentsError) {
+    throw new Error(pendingDocumentsError.message);
+  }
+
+  if (!pendingDocuments || pendingDocuments.length === 0) {
+    return;
+  }
+
+  const { error: metadataError } = await client.from("patient_documents").insert(
+    pendingDocuments.map((document) => ({
+      company_id: companyId,
+      patient_id: patientId,
+      sample_id: sampleId,
+      storage_path: document.storage_path,
+      original_filename: document.original_filename,
+      mime_type: document.mime_type || "application/octet-stream",
+      uploaded_by: userId,
+    })),
+  );
+
+  if (metadataError) {
+    throw new Error(metadataError.message);
+  }
+
+  const pendingDocumentIds = pendingDocuments.map((document) => document.id);
+  const { error: cleanupError } = await client
+    .from("pending_intake_documents")
+    .delete()
+    .in("id", pendingDocumentIds);
+
+  if (cleanupError) {
+    throw new Error(cleanupError.message);
+  }
 }
 
 function redirectWithPath(path: string, type: "message" | "error", text: string): never {
@@ -130,7 +231,7 @@ async function requireSessionProfile() {
 
   const { data: profile, error } = await supabase
     .from("user_profiles")
-    .select("id, role, company_id")
+    .select("id, role, company_id, first_name, last_name")
     .eq("id", user.id)
     .single();
 
@@ -167,6 +268,43 @@ function resolveCompanyId(profile: SessionProfile, formData: FormData) {
   }
 
   return profile.company_id;
+}
+
+function ensureCompanyDeleteScope(profile: SessionProfile, companyId: string, redirectPath: string) {
+  if (profile.role === "admin") {
+    return;
+  }
+
+  const assignedCompanyId = requireAssignedCompanyId(profile, redirectPath);
+
+  if (assignedCompanyId !== companyId) {
+    redirectWithPath(redirectPath, "error", "You can only remove records tied to your clinic.");
+  }
+}
+
+async function bestEffortRemoveDocumentObjects(storagePaths: Array<string | null | undefined>) {
+  const uniquePaths = Array.from(
+    new Set(
+      storagePaths
+        .filter((path): path is string => typeof path === "string" && path.trim().length > 0)
+        .map((path) => path.trim()),
+    ),
+  );
+
+  if (uniquePaths.length === 0) {
+    return;
+  }
+
+  try {
+    const admin = createSupabaseAdminClient();
+    const { error } = await admin.storage.from("patient-documents").remove(uniquePaths);
+
+    if (error) {
+      console.error("Document storage cleanup failed:", error.message);
+    }
+  } catch (error) {
+    console.error("Document storage cleanup failed:", error);
+  }
 }
 
 export async function signInAction(formData: FormData) {
@@ -286,6 +424,69 @@ export async function signUpAction(formData: FormData) {
 export async function requestClinicAction(formData: FormData) {
   const admin = createSupabaseAdminClient();
   const redirectPath = getRedirectPath(formData, "/signup?request_clinic=true");
+  const requesterEmail = getValue(formData, "requester_email");
+  const requesterFirstName = getValue(formData, "requester_first_name");
+  const requesterLastName = getValue(formData, "requester_last_name");
+  const password = getValue(formData, "password");
+
+  if (password.length < 8) {
+    redirectWithPath(redirectPath, "error", "Password must be at least 8 characters.");
+  }
+
+  let existingUser = null;
+
+  try {
+    existingUser = await findAuthUserByEmail(requesterEmail);
+  } catch (lookupError) {
+    redirectWithPath(
+      redirectPath,
+      "error",
+      lookupError instanceof Error ? lookupError.message : "Existing users could not be checked.",
+    );
+  }
+
+  if (existingUser) {
+    redirectWithPath(
+      redirectPath,
+      "error",
+      "An account already exists for this email. Use that login or contact an admin if you need help.",
+    );
+  }
+
+  const { data: createdUser, error: createUserError } = await admin.auth.admin.createUser({
+    email: requesterEmail,
+    password,
+    email_confirm: true,
+    user_metadata: {
+      first_name: requesterFirstName,
+      last_name: requesterLastName,
+    },
+  });
+
+  if (createUserError || !createdUser.user) {
+    redirectWithPath(
+      redirectPath,
+      "error",
+      createUserError?.message ?? "The clinic requester account could not be created.",
+    );
+  }
+
+  const requesterUserId = createdUser.user.id;
+
+  const { error: profileError } = await admin.from("user_profiles").upsert({
+    id: requesterUserId,
+    company_id: null,
+    first_name: requesterFirstName,
+    last_name: requesterLastName,
+    notes: optionalValue(formData, "notes"),
+    role: "customer",
+    account_status: "pending",
+  });
+
+  if (profileError) {
+    await admin.auth.admin.deleteUser(requesterUserId);
+    redirectWithPath(redirectPath, "error", profileError.message);
+  }
 
   const { error } = await admin.from("clinic_requests").insert({
     clinic_name: getValue(formData, "clinic_name"),
@@ -296,18 +497,24 @@ export async function requestClinicAction(formData: FormData) {
     contact_email: getValue(formData, "contact_email"),
     contact_phone: getValue(formData, "contact_phone"),
     fax_number: optionalValue(formData, "fax_number"),
-    requester_first_name: getValue(formData, "requester_first_name"),
-    requester_last_name: getValue(formData, "requester_last_name"),
-    requester_email: getValue(formData, "requester_email"),
+    requester_first_name: requesterFirstName,
+    requester_last_name: requesterLastName,
+    requester_email: requesterEmail,
     notes: optionalValue(formData, "notes"),
   });
 
   if (error) {
+    await admin.auth.admin.deleteUser(requesterUserId);
     redirectWithPath(redirectPath, "error", error.message);
   }
 
   revalidatePath("/admin/clinics");
-  redirectWithPath(redirectPath, "message", "Clinic request submitted. Complete Omics will review it before account creation.");
+  revalidatePath("/admin/accounts");
+  redirectWithPath(
+    redirectPath,
+    "message",
+    "Clinic request submitted. Your login was created and will stay pending until the clinic is approved.",
+  );
 }
 
 export async function approveClinicRequestAction(formData: FormData) {
@@ -356,16 +563,18 @@ export async function approveClinicRequestAction(formData: FormData) {
   }
 
   const requesterEmail = request.requester_email.toLowerCase();
-  const { data: authUsers, error: usersError } = await admin.auth.admin.listUsers({
-    page: 1,
-    perPage: 1000,
-  });
+  let existingUser = null;
 
-  if (usersError) {
-    redirectWithPath(redirectPath, "error", usersError.message);
+  try {
+    existingUser = await findAuthUserByEmail(requesterEmail);
+  } catch (lookupError) {
+    redirectWithPath(
+      redirectPath,
+      "error",
+      lookupError instanceof Error ? lookupError.message : "Existing users could not be checked.",
+    );
   }
 
-  const existingUser = authUsers.users.find((authUser) => authUser.email?.toLowerCase() === requesterEmail);
   let userId = existingUser?.id;
 
   if (!userId) {
@@ -417,6 +626,16 @@ export async function denyClinicRequestAction(formData: FormData) {
   const requestId = getValue(formData, "id");
   const redirectPath = getRedirectPath(formData, "/admin/clinics");
 
+  const { data: request, error: requestError } = await admin
+    .from("clinic_requests")
+    .select("requester_email")
+    .eq("id", requestId)
+    .single();
+
+  if (requestError || !request) {
+    redirectWithPath(redirectPath, "error", requestError?.message ?? "Clinic request could not be found.");
+  }
+
   const { error } = await admin
     .from("clinic_requests")
     .update({ status: "rejected" })
@@ -426,7 +645,29 @@ export async function denyClinicRequestAction(formData: FormData) {
     redirectWithPath(redirectPath, "error", error.message);
   }
 
+  try {
+    const requesterUser = await findAuthUserByEmail(request.requester_email);
+
+    if (requesterUser) {
+      const { error: profileError } = await admin
+        .from("user_profiles")
+        .update({ account_status: "denied" })
+        .eq("id", requesterUser.id);
+
+      if (profileError) {
+        redirectWithPath(redirectPath, "error", profileError.message);
+      }
+    }
+  } catch (lookupError) {
+    redirectWithPath(
+      redirectPath,
+      "error",
+      lookupError instanceof Error ? lookupError.message : "The requester account could not be updated.",
+    );
+  }
+
   revalidatePath("/admin/clinics");
+  revalidatePath("/admin/accounts");
   redirectWithPath(redirectPath, "message", "Clinic request denied.");
 }
 
@@ -532,10 +773,16 @@ export async function createCompanyAction(formData: FormData) {
 }
 
 export async function updateCompanyAction(formData: FormData) {
-  await requireAdminSession();
+  const { profile } = await requireSessionProfile();
   const admin = createSupabaseAdminClient();
-  const companyId = getValue(formData, "id");
-  const redirectPath = getRedirectPath(formData, "/admin/clinics");
+  const redirectPath =
+    profile.role === "admin"
+      ? getRedirectPath(formData, "/admin/clinics")
+      : getRedirectPath(formData, "/?customer_view=account");
+  const companyId =
+    profile.role === "admin"
+      ? getValue(formData, "id")
+      : requireAssignedCompanyId(profile, redirectPath);
 
   const { error } = await admin
     .from("companies")
@@ -557,6 +804,56 @@ export async function updateCompanyAction(formData: FormData) {
 
   revalidatePath("/");
   redirectWithPath(redirectPath, "message", "Clinic updated.");
+}
+
+export async function deleteCompanyAction(formData: FormData) {
+  const { profile } = await requireSessionProfile();
+  const admin = createSupabaseAdminClient();
+  const redirectPath = getRedirectPath(formData, "/admin/clinics");
+
+  if (profile.role !== "admin") {
+    redirectWithPath(redirectPath, "error", "Only admins can remove clinics.");
+  }
+
+  const companyId = getValue(formData, "id");
+
+  const { data: company, error: companyError } = await admin
+    .from("companies")
+    .select("id")
+    .eq("id", companyId)
+    .single();
+
+  if (companyError || !company) {
+    redirectWithPath(redirectPath, "error", companyError?.message ?? "Clinic could not be found.");
+  }
+
+  const [{ data: documentRows, error: documentRowsError }, { data: pendingRows, error: pendingRowsError }] =
+    await Promise.all([
+      admin.from("patient_documents").select("storage_path").eq("company_id", company.id),
+      admin.from("pending_intake_documents").select("storage_path").eq("company_id", company.id),
+    ]);
+
+  if (documentRowsError) {
+    redirectWithPath(redirectPath, "error", documentRowsError.message);
+  }
+
+  if (pendingRowsError) {
+    redirectWithPath(redirectPath, "error", pendingRowsError.message);
+  }
+
+  const { error } = await admin.from("companies").delete().eq("id", company.id);
+
+  if (error) {
+    redirectWithPath(redirectPath, "error", error.message);
+  }
+
+  await bestEffortRemoveDocumentObjects([
+    ...(documentRows ?? []).map((row) => row.storage_path),
+    ...(pendingRows ?? []).map((row) => row.storage_path),
+  ]);
+
+  revalidatePath("/");
+  redirectWithPath(redirectPath, "message", "Clinic removed.");
 }
 
 export async function updateUserProfileAction(formData: FormData) {
@@ -684,15 +981,22 @@ export async function createPatientAction(formData: FormData) {
 }
 
 export async function updatePatientAction(formData: FormData) {
-  await requireAdminSession();
-  const admin = createSupabaseAdminClient();
+  const { profile } = await requireSessionProfile();
+  const redirectPath =
+    profile.role === "admin"
+      ? getRedirectPath(formData, "/admin/patients")
+      : getRedirectPath(formData, "/?customer_view=patients");
+  const companyId =
+    profile.role === "admin"
+      ? parseLookupValue(getValue(formData, "company_id")) ?? getValue(formData, "company_id")
+      : requireAssignedCompanyId(profile, redirectPath);
+  const supabase = profile.role === "admin" ? createSupabaseAdminClient() : await createSupabaseServerClient();
   const patientId = getValue(formData, "id");
-  const redirectPath = getRedirectPath(formData, "/admin/operations");
 
-  const { error } = await admin
+  const { error } = await supabase
     .from("patients")
     .update({
-      company_id: getValue(formData, "company_id"),
+      company_id: companyId,
       first_name: getValue(formData, "first_name"),
       last_name: getValue(formData, "last_name"),
       date_of_birth: getValue(formData, "date_of_birth"),
@@ -716,6 +1020,65 @@ export async function updatePatientAction(formData: FormData) {
 
   revalidatePath("/");
   redirectWithPath(redirectPath, "message", "Patient updated.");
+}
+
+export async function deletePatientAction(formData: FormData) {
+  const { profile } = await requireSessionProfile();
+  const admin = createSupabaseAdminClient();
+  const redirectPath =
+    profile.role === "admin"
+      ? getRedirectPath(formData, "/admin/patients")
+      : getRedirectPath(formData, "/?customer_view=patients");
+  const patientId = getValue(formData, "id");
+
+  const { data: patient, error: patientError } = await admin
+    .from("patients")
+    .select("id, company_id")
+    .eq("id", patientId)
+    .single();
+
+  if (patientError || !patient) {
+    redirectWithPath(redirectPath, "error", patientError?.message ?? "Patient could not be found.");
+  }
+
+  ensureCompanyDeleteScope(profile, patient.company_id, redirectPath);
+
+  const { data: documentRows, error: documentRowsError } = await admin
+    .from("patient_documents")
+    .select("id, storage_path")
+    .eq("patient_id", patient.id);
+
+  if (documentRowsError) {
+    redirectWithPath(redirectPath, "error", documentRowsError.message);
+  }
+
+  const documentIds = (documentRows ?? []).map((row) => row.id);
+  const documentPaths = (documentRows ?? []).map((row) => row.storage_path);
+
+  if (documentIds.length > 0) {
+    const { error: deleteDocumentsError } = await admin.from("patient_documents").delete().in("id", documentIds);
+
+    if (deleteDocumentsError) {
+      redirectWithPath(redirectPath, "error", deleteDocumentsError.message);
+    }
+  }
+
+  const { error: deleteSamplesError } = await admin.from("samples").delete().eq("patient_id", patient.id);
+
+  if (deleteSamplesError) {
+    redirectWithPath(redirectPath, "error", deleteSamplesError.message);
+  }
+
+  const { error } = await admin.from("patients").delete().eq("id", patient.id);
+
+  if (error) {
+    redirectWithPath(redirectPath, "error", error.message);
+  }
+
+  await bestEffortRemoveDocumentObjects(documentPaths);
+
+  revalidatePath("/");
+  redirectWithPath(redirectPath, "message", "Patient removed.");
 }
 
 export async function createPackageAction(formData: FormData) {
@@ -745,15 +1108,22 @@ export async function createPackageAction(formData: FormData) {
 }
 
 export async function updatePackageAction(formData: FormData) {
-  await requireAdminSession();
-  const admin = createSupabaseAdminClient();
+  const { profile } = await requireSessionProfile();
+  const redirectPath =
+    profile.role === "admin"
+      ? getRedirectPath(formData, "/admin/packages")
+      : getRedirectPath(formData, "/?customer_view=packages");
+  const companyId =
+    profile.role === "admin"
+      ? parseLookupValue(getValue(formData, "company_id")) ?? getValue(formData, "company_id")
+      : requireAssignedCompanyId(profile, redirectPath);
+  const supabase = profile.role === "admin" ? createSupabaseAdminClient() : await createSupabaseServerClient();
   const packageId = getValue(formData, "id");
-  const redirectPath = getRedirectPath(formData, "/admin/operations");
 
-  const { error } = await admin
+  const { error } = await supabase
     .from("fedex_packages")
     .update({
-      company_id: getValue(formData, "company_id"),
+      company_id: companyId,
       package_id: getValue(formData, "package_id"),
       mailed_at: normalizeDateTimeInput(optionalValue(formData, "mailed_at")),
       received_at: normalizeDateTimeInput(optionalValue(formData, "received_at")),
@@ -768,18 +1138,51 @@ export async function updatePackageAction(formData: FormData) {
   redirectWithPath(redirectPath, "message", "Package updated.");
 }
 
-export async function createSampleAction(formData: FormData) {
+export async function deletePackageAction(formData: FormData) {
   const { profile } = await requireSessionProfile();
+  const admin = createSupabaseAdminClient();
+  const redirectPath =
+    profile.role === "admin"
+      ? getRedirectPath(formData, "/admin/packages")
+      : getRedirectPath(formData, "/?customer_view=packages");
+  const packageRecordId = getValue(formData, "id");
+
+  const { data: fedexPackage, error: packageError } = await admin
+    .from("fedex_packages")
+    .select("id, company_id")
+    .eq("id", packageRecordId)
+    .single();
+
+  if (packageError || !fedexPackage) {
+    redirectWithPath(redirectPath, "error", packageError?.message ?? "Package could not be found.");
+  }
+
+  ensureCompanyDeleteScope(profile, fedexPackage.company_id, redirectPath);
+
+  const { error } = await admin.from("fedex_packages").delete().eq("id", fedexPackage.id);
+
+  if (error) {
+    redirectWithPath(redirectPath, "error", error.message);
+  }
+
+  revalidatePath("/");
+  redirectWithPath(redirectPath, "message", "Package removed.");
+}
+
+export async function createSampleAction(formData: FormData) {
+  const { supabase, profile } = await requireSessionProfile();
   const companyId = resolveCompanyId(profile, formData);
   const redirectPath = getRedirectPath(formData, "/admin/intake");
 
-  const admin = profile.role === "admin" ? createSupabaseAdminClient() : null;
-  const supabase = admin ?? (await createSupabaseServerClient());
   const receivedAt = normalizeDateInput(optionalValue(formData, "received_at"));
   const status =
     profile.role === "admin"
-      ? normalizeSampleStatusInput(getValue(formData, "status"))
+      ? normalizeSampleStatus(getValue(formData, "status"))
       : "submitted";
+  const collectedBy =
+    profile.role === "admin"
+      ? optionalValue(formData, "collected_by")
+      : getProfileDisplayName(profile) ?? optionalValue(formData, "collected_by");
 
   ensureReviewDecisionAllowed(status, receivedAt, redirectPath);
 
@@ -790,9 +1193,9 @@ export async function createSampleAction(formData: FormData) {
     fedex_package_id: parseLookupValue(optionalValue(formData, "fedex_package_id")),
     collected_at: normalizeDateInput(optionalValue(formData, "collected_at")),
     received_at: receivedAt,
-    collected_by: optionalValue(formData, "collected_by"),
+    collected_by: collectedBy,
     missing_info: optionalValue(formData, "missing_info"),
-    sex: optionalValue(formData, "sex"),
+    sex: normalizeSexInput(optionalValue(formData, "sex")),
     ordering_provider_name: optionalValue(formData, "ordering_provider_name"),
     hart_cadhs: formData.has("hart_cadhs"),
     hart_cve: formData.has("hart_cve"),
@@ -811,16 +1214,17 @@ export async function createSampleAction(formData: FormData) {
 }
 
 export async function createCustomerIntakeAction(formData: FormData) {
-  const { profile } = await requireSessionProfile();
+  const { supabase, profile, user } = await requireSessionProfile();
   const companyId = resolveCompanyId(profile, formData);
   const redirectPath = getRedirectPath(formData);
+  const draftKey = optionalValue(formData, "draft_key");
+  const adminClient = createSupabaseAdminClient();
 
-  const admin = profile.role === "admin" ? createSupabaseAdminClient() : null;
-  const supabase = admin ?? (await createSupabaseServerClient());
   const status =
     profile.role === "admin"
-      ? normalizeSampleStatusInput(getValue(formData, "status"))
+      ? normalizeSampleStatus(getValue(formData, "status"))
       : "submitted";
+  const collectedBy = getProfileDisplayName(profile) ?? optionalValue(formData, "collected_by");
   const receivedAt =
     profile.role === "admin" ? normalizeDateInput(optionalValue(formData, "received_at")) : null;
 
@@ -896,64 +1300,181 @@ export async function createCustomerIntakeAction(formData: FormData) {
     }
   }
 
-  const { error } = await supabase.from("samples").insert({
-    company_id: companyId,
-    sample_number: getValue(formData, "sample_number"),
-    patient_id: patientId,
-    fedex_package_id: fedexPackageId,
-    collected_at: normalizeDateInput(optionalValue(formData, "collected_at")),
-    received_at: receivedAt,
-    collected_by: optionalValue(formData, "collected_by"),
-    missing_info: optionalValue(formData, "missing_info"),
-    sex: optionalValue(formData, "sex"),
-    ordering_provider_name: optionalValue(formData, "ordering_provider_name"),
-    hart_cadhs: formData.has("hart_cadhs") || getValue(formData, "hart_cadhs") === "true",
-    hart_cve: formData.has("hart_cve") || getValue(formData, "hart_cve") === "true",
-    icd10_codes: normalizeIcd10CodesFromForm(formData),
-    npi_number: optionalValue(formData, "npi_number"),
-    status,
-    rejected: status === "rejected",
-  });
+  if (!patientId) {
+    redirectWithPath(redirectPath, "error", "Patient could not be resolved for this intake.");
+  }
 
-  if (error) {
-    redirectWithPath(redirectPath, "error", error.message);
+  const { data: sample, error } = await supabase
+    .from("samples")
+    .insert({
+      company_id: companyId,
+      sample_number: getValue(formData, "sample_number"),
+      patient_id: patientId,
+      fedex_package_id: fedexPackageId,
+      collected_at: normalizeDateInput(optionalValue(formData, "collected_at")),
+      received_at: receivedAt,
+      collected_by: collectedBy,
+      missing_info: optionalValue(formData, "missing_info"),
+      sex: normalizeSexInput(optionalValue(formData, "sex")),
+      ordering_provider_name: optionalValue(formData, "ordering_provider_name"),
+      hart_cadhs: formData.has("hart_cadhs") || getValue(formData, "hart_cadhs") === "true",
+      hart_cve: formData.has("hart_cve") || getValue(formData, "hart_cve") === "true",
+      icd10_codes: normalizeIcd10CodesFromForm(formData),
+      npi_number: optionalValue(formData, "npi_number"),
+      status,
+      rejected: status === "rejected",
+    })
+    .select("id")
+    .single();
+
+  if (error || !sample) {
+    redirectWithPath(redirectPath, "error", error?.message ?? "Sample intake could not be created.");
+  }
+
+  try {
+    await finalizePendingIntakeDocuments({
+      client: adminClient,
+      companyId,
+      userId: user.id,
+      draftKey,
+      patientId,
+      sampleId: sample.id,
+    });
+  } catch (pendingDocumentError) {
+    const message =
+      pendingDocumentError instanceof Error
+        ? pendingDocumentError.message
+        : "Sample submitted, but staged documents could not be attached.";
+    redirectWithPath(redirectPath, "error", message);
   }
 
   revalidatePath("/");
   redirectWithPath(redirectPath, "message", "Sample intake submitted.");
 }
 
+export async function uploadPendingIntakeDocumentAction(formData: FormData) {
+  const uploadCandidate = formData.get("document");
+  const redirectPath = getRedirectPath(formData, "/?customer_view=intake&intake_step=files");
+
+  if (!(uploadCandidate instanceof File) || uploadCandidate.size === 0) {
+    redirectWithPath(redirectPath, "error", "Choose a document before uploading.");
+  }
+
+  const draftKey = optionalValue(formData, "draft_key");
+
+  if (!draftKey) {
+    redirectWithPath(redirectPath, "error", "This intake draft is missing its document key.");
+  }
+
+  const fileToUpload = uploadCandidate;
+  const { profile, user } = await requireSessionProfile();
+  const companyId = resolveCompanyId(profile, formData);
+  const client = createSupabaseAdminClient();
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const cleanName = fileToUpload.name.replace(/[^a-zA-Z0-9._-]/g, "-");
+  const storagePath = `${companyId}/pending/${user.id}/${draftKey}/${timestamp}-${cleanName}`;
+
+  const { error: uploadError } = await client.storage
+    .from("patient-documents")
+    .upload(storagePath, fileToUpload, {
+      contentType: fileToUpload.type,
+      upsert: false,
+    });
+
+  if (uploadError) {
+    redirectWithPath(redirectPath, "error", uploadError.message);
+  }
+
+  const { error: metadataError } = await client.from("pending_intake_documents").insert({
+    company_id: companyId,
+    user_id: user.id,
+    draft_key: draftKey,
+    storage_path: storagePath,
+    original_filename: fileToUpload.name,
+    mime_type: fileToUpload.type || "application/octet-stream",
+  });
+
+  if (metadataError) {
+    redirectWithPath(redirectPath, "error", metadataError.message);
+  }
+
+  revalidatePath("/");
+  redirectWithPath(redirectPath, "message", "Document staged for this intake.");
+}
+
 export async function updateSampleAction(formData: FormData) {
-  await requireAdminSession();
-  const admin = createSupabaseAdminClient();
+  const { supabase, profile } = await requireSessionProfile();
   const sampleId = getValue(formData, "id");
-  const requestedStatus = normalizeSampleStatusInput(getValue(formData, "status"));
-  const rejected = requestedStatus === "rejected" || getValue(formData, "rejected") === "true";
-  const status = rejected ? "rejected" : requestedStatus;
-  const redirectPath = getRedirectPath(formData, "/admin/samples");
-  const receivedAt = normalizeDateInput(optionalValue(formData, "received_at"));
+  const redirectPath =
+    profile.role === "admin"
+      ? getRedirectPath(formData, "/admin/samples")
+      : getRedirectPath(formData, "/?customer_view=samples");
+  const companyId =
+    profile.role === "admin"
+      ? parseLookupValue(getValue(formData, "company_id")) ?? getValue(formData, "company_id")
+      : requireAssignedCompanyId(profile, redirectPath);
+  const receivedAt =
+    profile.role === "admin" ? normalizeDateInput(optionalValue(formData, "received_at")) : null;
 
-  ensureReviewDecisionAllowed(status, receivedAt, redirectPath);
+  const { data: existingSample, error: existingSampleError } = await supabase
+    .from("samples")
+    .select("status, rejected, rejection_reason, rejected_at, rejected_by, received_at, collected_by")
+    .eq("id", sampleId)
+    .single();
 
-  const { error } = await admin
+  if (existingSampleError || !existingSample) {
+    redirectWithPath(redirectPath, "error", existingSampleError?.message ?? "Sample could not be found.");
+  }
+
+  const requestedStatus = normalizeSampleStatus(getValue(formData, "status"));
+  const status =
+    profile.role === "admin"
+      ? requestedStatus === "rejected" || getValue(formData, "rejected") === "true"
+        ? "rejected"
+        : requestedStatus
+      : normalizeCustomerEditableSampleStatus(existingSample.status, requestedStatus);
+  const rejected = profile.role === "admin" ? status === "rejected" : existingSample.rejected;
+  const effectiveReceivedAt = profile.role === "admin" ? receivedAt : existingSample.received_at;
+
+  ensureReviewDecisionAllowed(status, effectiveReceivedAt, redirectPath);
+
+  const { error } = await supabase
     .from("samples")
     .update({
       sample_number: getValue(formData, "sample_number"),
-      company_id: parseLookupValue(getValue(formData, "company_id")),
+      company_id: companyId,
       patient_id: parseLookupValue(getValue(formData, "patient_id")),
       fedex_package_id: parseLookupValue(optionalValue(formData, "fedex_package_id")),
       status,
-      received_at: receivedAt,
+      received_at: effectiveReceivedAt,
       collected_at: normalizeDateInput(optionalValue(formData, "collected_at")),
-      collected_by: optionalValue(formData, "collected_by"),
-      sex: optionalValue(formData, "sex"),
+      collected_by:
+        profile.role === "admin"
+          ? optionalValue(formData, "collected_by")
+          : existingSample.collected_by ?? getProfileDisplayName(profile),
+      sex: normalizeSexInput(optionalValue(formData, "sex")),
       ordering_provider_name: optionalValue(formData, "ordering_provider_name"),
       missing_info: optionalValue(formData, "missing_info"),
       icd10_codes: normalizeIcd10CodesFromForm(formData),
       npi_number: optionalValue(formData, "npi_number"),
-      rejection_reason: rejected ? optionalValue(formData, "rejection_reason") : null,
-      rejected_at: rejected ? undefined : null,
-      rejected_by: rejected ? undefined : null,
+      rejection_reason:
+        profile.role === "admin"
+          ? rejected
+            ? optionalValue(formData, "rejection_reason")
+            : null
+          : existingSample.rejection_reason,
+      rejected_at:
+        profile.role === "admin"
+          ? rejected
+            ? undefined
+            : null
+          : existingSample.rejected_at,
+      rejected_by:
+        profile.role === "admin"
+          ? rejected
+            ? undefined
+            : null
+          : existingSample.rejected_by,
       rejected,
       hart_cadhs: formData.has("hart_cadhs"),
       hart_cve: formData.has("hart_cve"),
@@ -968,14 +1489,231 @@ export async function updateSampleAction(formData: FormData) {
   redirectWithPath(redirectPath, "message", "Sample updated.");
 }
 
-export async function reviewIncomingSampleAction(formData: FormData) {
+export async function deleteSampleAction(formData: FormData) {
+  const { profile } = await requireSessionProfile();
+  const admin = createSupabaseAdminClient();
+  const sampleId = getValue(formData, "id");
+  const redirectPath =
+    profile.role === "admin"
+      ? getRedirectPath(formData, "/admin/samples")
+      : getRedirectPath(formData, "/?customer_view=samples");
+
+  const { data: sample, error: sampleError } = await admin
+    .from("samples")
+    .select("id, company_id")
+    .eq("id", sampleId)
+    .single();
+
+  if (sampleError || !sample) {
+    redirectWithPath(redirectPath, "error", sampleError?.message ?? "Sample could not be found.");
+  }
+
+  ensureCompanyDeleteScope(profile, sample.company_id, redirectPath);
+
+  const { data: documentRows, error: documentRowsError } = await admin
+    .from("patient_documents")
+    .select("id, storage_path")
+    .eq("sample_id", sample.id);
+
+  if (documentRowsError) {
+    redirectWithPath(redirectPath, "error", documentRowsError.message);
+  }
+
+  const documentIds = (documentRows ?? []).map((row) => row.id);
+  const documentPaths = (documentRows ?? []).map((row) => row.storage_path);
+
+  if (documentIds.length > 0) {
+    const { error: deleteDocumentsError } = await admin.from("patient_documents").delete().in("id", documentIds);
+
+    if (deleteDocumentsError) {
+      redirectWithPath(redirectPath, "error", deleteDocumentsError.message);
+    }
+  }
+
+  const { error } = await admin.from("samples").delete().eq("id", sample.id);
+
+  if (error) {
+    redirectWithPath(redirectPath, "error", error.message);
+  }
+
+  await bestEffortRemoveDocumentObjects(documentPaths);
+
+  revalidatePath("/");
+  redirectWithPath(redirectPath, "message", "Sample removed.");
+}
+
+export async function updateDocumentAction(formData: FormData) {
+  const { profile } = await requireSessionProfile();
+  const redirectPath =
+    profile.role === "admin"
+      ? getRedirectPath(formData, "/admin/documents")
+      : getRedirectPath(formData, "/?customer_view=operations");
+  const companyId =
+    profile.role === "admin"
+      ? parseLookupValue(getValue(formData, "company_id")) ?? getValue(formData, "company_id")
+      : requireAssignedCompanyId(profile, redirectPath);
+  const client = profile.role === "admin" ? createSupabaseAdminClient() : await createSupabaseServerClient();
+  const documentId = getValue(formData, "id");
+  const patientId = parseLookupValue(optionalValue(formData, "patient_id")) ?? optionalValue(formData, "patient_id");
+  const sampleId = parseLookupValue(optionalValue(formData, "sample_id")) ?? optionalValue(formData, "sample_id");
+
+  if (!patientId || !sampleId) {
+    redirectWithPath(redirectPath, "error", "Choose both a patient and a sample before saving the document.");
+  }
+
+  const { data: sample, error: sampleError } = await client
+    .from("samples")
+    .select("id, patient_id, company_id")
+    .eq("id", sampleId)
+    .single();
+
+  if (sampleError || !sample) {
+    redirectWithPath(redirectPath, "error", sampleError?.message ?? "Selected sample could not be found.");
+  }
+
+  if (sample.patient_id !== patientId) {
+    redirectWithPath(redirectPath, "error", "Selected sample is not tied to the selected patient.");
+  }
+
+  if (sample.company_id !== companyId) {
+    redirectWithPath(redirectPath, "error", "Selected sample is not tied to the selected clinic.");
+  }
+
+  const { error } = await client
+    .from("patient_documents")
+    .update({
+      company_id: companyId,
+      patient_id: patientId,
+      sample_id: sampleId,
+    })
+    .eq("id", documentId);
+
+  if (error) {
+    redirectWithPath(redirectPath, "error", error.message);
+  }
+
+  revalidatePath("/");
+  redirectWithPath(redirectPath, "message", "Document updated.");
+}
+
+export async function deleteDocumentAction(formData: FormData) {
+  const { profile } = await requireSessionProfile();
+  const admin = createSupabaseAdminClient();
+  const redirectPath =
+    profile.role === "admin"
+      ? getRedirectPath(formData, "/admin/documents")
+      : getRedirectPath(formData, "/?customer_view=operations");
+  const documentId = getValue(formData, "id");
+
+  const { data: document, error: documentError } = await admin
+    .from("patient_documents")
+    .select("id, company_id, storage_path")
+    .eq("id", documentId)
+    .single();
+
+  if (documentError || !document) {
+    redirectWithPath(redirectPath, "error", documentError?.message ?? "Document could not be found.");
+  }
+
+  ensureCompanyDeleteScope(profile, document.company_id, redirectPath);
+
+  const { error } = await admin.from("patient_documents").delete().eq("id", document.id);
+
+  if (error) {
+    redirectWithPath(redirectPath, "error", error.message);
+  }
+
+  await bestEffortRemoveDocumentObjects([document.storage_path]);
+
+  revalidatePath("/");
+  redirectWithPath(redirectPath, "message", "Document removed.");
+}
+
+export async function deleteUserProfileAction(formData: FormData) {
+  const { user } = await requireAdminSession();
+  const admin = createSupabaseAdminClient();
+  const profileId = getValue(formData, "id");
+  const redirectPath = getRedirectPath(formData, "/admin/accounts");
+
+  if (user.id === profileId) {
+    redirectWithPath(redirectPath, "error", "Your current admin session cannot delete itself.");
+  }
+
+  const { data: profile, error: profileError } = await admin
+    .from("user_profiles")
+    .select("id")
+    .eq("id", profileId)
+    .single();
+
+  if (profileError || !profile) {
+    redirectWithPath(redirectPath, "error", profileError?.message ?? "User profile could not be found.");
+  }
+
+  const { error: deleteProfileError } = await admin.from("user_profiles").delete().eq("id", profile.id);
+
+  if (deleteProfileError) {
+    redirectWithPath(redirectPath, "error", deleteProfileError.message);
+  }
+
+  const { error: deleteAuthError } = await admin.auth.admin.deleteUser(profile.id);
+
+  if (deleteAuthError) {
+    redirectWithPath(redirectPath, "error", deleteAuthError.message);
+  }
+
+  revalidatePath("/");
+  redirectWithPath(redirectPath, "message", "User account removed.");
+}
+
+export async function deleteContactMessageAction(formData: FormData) {
   await requireAdminSession();
   const admin = createSupabaseAdminClient();
+  const messageId = getValue(formData, "id");
+  const redirectPath = getRedirectPath(formData, "/admin/contact");
+
+  const { error } = await admin.from("contact_messages").delete().eq("id", messageId);
+
+  if (error) {
+    redirectWithPath(redirectPath, "error", error.message);
+  }
+
+  revalidatePath("/");
+  redirectWithPath(redirectPath, "message", "Contact message removed.");
+}
+
+export async function markSampleReceivedAction(formData: FormData) {
+  const { supabase } = await requireAdminSession();
+  const sampleId = getValue(formData, "id");
+  const redirectPath = getRedirectPath(formData, "/admin/samples");
+  const receivedAt = normalizeDateInput(optionalValue(formData, "received_at"));
+
+  if (!receivedAt) {
+    redirectWithPath(redirectPath, "error", "Choose a received date before marking this sample received.");
+  }
+
+  const { error } = await supabase
+    .from("samples")
+    .update({
+      received_at: receivedAt,
+    })
+    .eq("id", sampleId);
+
+  if (error) {
+    redirectWithPath(redirectPath, "error", error.message);
+  }
+
+  revalidatePath("/");
+  redirectWithPath(redirectPath, "message", "Sample marked received.");
+}
+
+export async function reviewIncomingSampleAction(formData: FormData) {
+  const { supabase } = await requireAdminSession();
   const sampleId = getValue(formData, "id");
   const decision = getValue(formData, "decision");
   const redirectPath = getRedirectPath(formData, "/admin/samples");
+  const rejectionReason = optionalValue(formData, "rejection_reason");
 
-  const { data: sample, error: sampleError } = await admin
+  const { data: sample, error: sampleError } = await supabase
     .from("samples")
     .select("received_at")
     .eq("id", sampleId)
@@ -993,12 +1731,16 @@ export async function reviewIncomingSampleAction(formData: FormData) {
     );
   }
 
+  if (decision === "reject" && !rejectionReason) {
+    redirectWithPath(redirectPath, "error", "Enter a rejection reason before rejecting this sample.");
+  }
+
   const update =
     decision === "reject"
       ? {
           rejected: true,
           status: "rejected",
-          rejection_reason: optionalValue(formData, "rejection_reason") ?? "Rejected during incoming sample review.",
+          rejection_reason: rejectionReason,
         }
       : {
           rejected: false,
@@ -1008,7 +1750,7 @@ export async function reviewIncomingSampleAction(formData: FormData) {
           rejected_by: null,
         };
 
-  const { error } = await admin.from("samples").update(update).eq("id", sampleId);
+  const { error } = await supabase.from("samples").update(update).eq("id", sampleId);
 
   if (error) {
     redirectWithPath(redirectPath, "error", error.message);

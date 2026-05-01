@@ -83,8 +83,10 @@ export default async function SignupPage({ searchParams }: { searchParams: Searc
           </div>
 
           {(message || error) && (
-            <div className={`status-banner ${error ? "status-banner--error" : ""}`}>
-              {error || message}
+            <div className="status-banner-shell">
+              <div className={`status-banner ${error ? "status-banner--error" : ""}`}>
+                {error || message}
+              </div>
             </div>
           )}
 
@@ -138,7 +140,7 @@ export default async function SignupPage({ searchParams }: { searchParams: Searc
             <form action={requestClinicAction} className="customer-login-form">
               <input type="hidden" name="redirect_to" value="/signup?request_clinic=true" />
               <p className="signup-helper-text">
-                Submit your clinic information for admin review. Once approved, customers can create accounts under that clinic.
+                Submit your clinic information for admin review. The email and password below will become your login once the clinic is approved.
               </p>
               <div className="form-grid">
                 <div className="field">
@@ -184,6 +186,16 @@ export default async function SignupPage({ searchParams }: { searchParams: Searc
                 <div className="field">
                   <label>Your email</label>
                   <input name="requester_email" type="email" placeholder="Enter here" required />
+                </div>
+                <div className="field">
+                  <label>Password</label>
+                  <input
+                    name="password"
+                    type="password"
+                    minLength={8}
+                    placeholder="Enter here"
+                    required
+                  />
                 </div>
               </div>
               <div className="field">

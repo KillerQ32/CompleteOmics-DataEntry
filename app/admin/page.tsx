@@ -69,8 +69,10 @@ export default async function AdminEntryPage({ searchParams }: { searchParams: S
           </div>
 
           {(message || error) && (
-            <div className={`status-banner ${error ? "status-banner--error" : ""}`}>
-              {error || message}
+            <div className="status-banner-shell">
+              <div className={`status-banner ${error ? "status-banner--error" : ""}`}>
+                {error || message}
+              </div>
             </div>
           )}
 

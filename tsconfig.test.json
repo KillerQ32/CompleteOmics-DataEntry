@@ -13,7 +13,7 @@
     "incremental": false
   },
   "include": [
-    "lib/customer-portal.ts",
+    "lib/**/*.ts",
     "tests/**/*.ts"
   ],
   "exclude": [

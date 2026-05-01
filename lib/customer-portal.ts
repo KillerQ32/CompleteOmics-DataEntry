@@ -1,3 +1,5 @@
+import { normalizeSampleStatus as normalizeWorkflowSampleStatus } from "./sample-workflow";
+
 export type CustomerView =
   | "home"
   | "samples"
@@ -46,21 +48,7 @@ export function normalizeIntakeStep(value: string): IntakeStep {
 }
 
 export function normalizeSampleStatus(value: string | null | undefined) {
-  switch (value) {
-    case "mailed":
-    case "accepted":
-    case "rejected":
-    case "submitted":
-      return value;
-    case "draft":
-      return "submitted";
-    case "received":
-    case "ready_for_review":
-    case "awaiting_documentation":
-      return "accepted";
-    default:
-      return "submitted";
-  }
+  return normalizeWorkflowSampleStatus(value);
 }
 
 export function formatSampleStatus(status: string, rejected = false) {

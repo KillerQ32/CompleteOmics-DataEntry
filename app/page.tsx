@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   approveClinicRequestAction,
   createCompanyAction,
@@ -5,6 +6,14 @@ import {
   createPackageAction,
   createPatientAction,
   createSampleAction,
+  deleteCompanyAction,
+  deleteContactMessageAction,
+  deleteDocumentAction,
+  deletePackageAction,
+  deletePatientAction,
+  deleteSampleAction,
+  deleteUserProfileAction,
+  markSampleReceivedAction,
   denyClinicRequestAction,
   reviewIncomingSampleAction,
   signInAction,
@@ -14,10 +23,12 @@ import {
   updateAccountApprovalAction,
   updateCustomerAccountAction,
   updateCompanyAction,
+  updateDocumentAction,
   updatePackageAction,
   updatePatientAction,
   updateSampleAction,
   updateUserProfileAction,
+  uploadPendingIntakeDocumentAction,
   uploadDocumentAction,
 } from "./actions";
 import { createSupabaseAdminClient } from "../lib/supabase/admin";
@@ -30,6 +41,7 @@ import {
   normalizeIntakeStep,
   normalizeSampleStatus,
 } from "../lib/customer-portal";
+import { isSampleReceived, isSampleReviewOverdue, SAMPLE_STATUS_OPTIONS } from "../lib/sample-workflow";
 import { createSupabaseServerClient } from "../lib/supabase/server";
 import { redirect } from "next/navigation";
 
@@ -59,18 +71,6 @@ type ProfileRow = {
   role: "admin" | "clinic_admin" | "customer";
   company_id: string | null;
   account_status: string;
-};
-
-type SampleRow = {
-  id: string;
-  sample_number: string;
-  status: string;
-  rejected: boolean;
-  collected_at: string | null;
-  received_at: string | null;
-  patient_full_name: string;
-  company_name: string;
-  package_id: string | null;
 };
 
 type AdminSampleRow = {
@@ -140,6 +140,14 @@ type DocumentRow = {
   original_filename: string;
   storage_path: string;
   created_at?: string;
+};
+
+type PendingIntakeDocumentRow = {
+  id: string;
+  draft_key: string;
+  original_filename: string;
+  storage_path: string;
+  created_at: string;
 };
 
 type IntakePatientDraft = {
@@ -227,29 +235,10 @@ type ContactMessageRow = {
   created_at: string;
 };
 
-const SAMPLE_STATUS_OPTIONS = ["submitted", "mailed", "accepted", "rejected"] as const;
 const INCOMING_SAMPLE_STATUSES = new Set(["submitted", "mailed"]);
 
 function normalizeSampleStatusFilter(value: string) {
   return value ? normalizeSampleStatus(value) : "";
-}
-
-function isSampleReceived(receivedAt: string | null) {
-  return Boolean(receivedAt);
-}
-
-function isSampleReviewOverdue(receivedAt: string | null) {
-  if (!receivedAt) {
-    return false;
-  }
-
-  const receivedTime = new Date(receivedAt).getTime();
-
-  if (Number.isNaN(receivedTime)) {
-    return false;
-  }
-
-  return Date.now() - receivedTime >= 5 * 24 * 60 * 60 * 1000;
 }
 
 function readParam(searchParams: Record<string, string | string[] | undefined>, key: string) {
@@ -260,6 +249,28 @@ function readParam(searchParams: Record<string, string | string[] | undefined>, 
 function readBooleanParam(searchParams: Record<string, string | string[] | undefined>, key: string) {
   const value = readParam(searchParams, key);
   return value === "true" || value === "on";
+}
+
+function formatAccountDisplayName(firstName?: string | null, lastName?: string | null) {
+  const parts = [firstName?.trim(), lastName?.trim()].filter(Boolean);
+  return parts.length > 0 ? parts.join(" ") : "";
+}
+
+function normalizeSexValue(value: string | null | undefined) {
+  if (!value) {
+    return "";
+  }
+
+  switch (value.trim().toLowerCase()) {
+    case "m":
+    case "male":
+      return "Male";
+    case "f":
+    case "female":
+      return "Female";
+    default:
+      return value.trim();
+  }
 }
 
 function buildPath(pathname: string, params: Record<string, string | null | undefined>) {
@@ -306,6 +317,22 @@ function formatDate(value: string | null) {
   return new Intl.DateTimeFormat("en-US", { dateStyle: "medium" }).format(new Date(value));
 }
 
+function formatDateOnly(value: string | null) {
+  if (!value) {
+    return "Pending";
+  }
+
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
+
+  if (!match) {
+    return formatDate(value);
+  }
+
+  const [, year, month, day] = match;
+  const utcDate = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)));
+  return new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeZone: "UTC" }).format(utcDate);
+}
+
 function formatDateTime(value: string | null) {
   if (!value) {
     return "Pending";
@@ -332,7 +359,18 @@ function toDateInput(value: string | null) {
     return "";
   }
 
+  const match = value.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (match) {
+    return match[1];
+  }
+
   return new Date(value).toISOString().slice(0, 10);
+}
+
+function todayDateInput() {
+  const now = new Date();
+  const offset = now.getTimezoneOffset();
+  return new Date(now.getTime() - offset * 60_000).toISOString().slice(0, 10);
 }
 
 function CompanyOptions({ companies }: { companies: CompanyRow[] }) {
@@ -411,7 +449,7 @@ function PackageLookupOptions({ packages }: { packages: PackageRow[] }) {
   );
 }
 
-function SampleLookupOptions({ samples }: { samples: SampleRow[] }) {
+function SampleLookupOptions({ samples }: { samples: Array<Pick<AdminSampleRow, "id" | "sample_number">> }) {
   return (
     <>
       {samples.map((sample) => (
@@ -419,6 +457,10 @@ function SampleLookupOptions({ samples }: { samples: SampleRow[] }) {
       ))}
     </>
   );
+}
+
+function formatSamplePatientName(sample: Pick<AdminSampleRow, "patient_first_name" | "patient_last_name">) {
+  return [sample.patient_first_name, sample.patient_last_name].filter(Boolean).join(" ").trim();
 }
 
 function CustomerShellLink({
@@ -449,6 +491,67 @@ function ReviewItem({ label, value }: { label: string; value: string | number | 
   );
 }
 
+function PendingAccountRequestsPanel({
+  accounts,
+  userEmailById,
+}: {
+  accounts: AdminUserRow[];
+  userEmailById: Map<string, string>;
+}) {
+  const pendingAccounts = accounts.filter((account) => account.account_status === "pending");
+
+  return (
+    <article className="panel panel--wide account-requests-panel">
+      <div className="panel__header">
+        <div>
+          <h3>Account Requests</h3>
+        </div>
+        <span className="admin-overview-count">{pendingAccounts.length} requests</span>
+      </div>
+      <div className="list-grid">
+        {pendingAccounts.map((account) => (
+          <div className="list-row account-request-row" key={account.id}>
+            <div>
+              <strong>{userEmailById.get(account.id) ?? "No auth email found"}</strong>
+              <span>{[account.first_name, account.last_name].filter(Boolean).join(" ") || "Name not set"}</span>
+            </div>
+            <div>
+              <strong>{account.company_name ?? "Clinic not assigned"}</strong>
+              <span>{account.role}</span>
+            </div>
+            <div>
+              <strong>{formatDate(account.created_at)}</strong>
+              <span>{account.account_status}</span>
+            </div>
+            {account.notes && <p>{account.notes}</p>}
+            <form action={updateAccountApprovalAction} className="account-request-row__actions">
+              <input type="hidden" name="id" value={account.id} />
+              <input type="hidden" name="redirect_to" value="/admin/accounts" />
+              <button
+                className="button button--primary button--compact"
+                type="submit"
+                name="account_status"
+                value="approved"
+              >
+                Approve
+              </button>
+              <button
+                className="button button--secondary button--compact"
+                type="submit"
+                name="account_status"
+                value="denied"
+              >
+                Deny
+              </button>
+            </form>
+          </div>
+        ))}
+        {pendingAccounts.length === 0 && <div className="empty-state">No pending account requests.</div>}
+      </div>
+    </article>
+  );
+}
+
 async function AuthLanding({ error, message }: { error: string; message: string }) {
   return (
     <main className="customer-login-page">
@@ -475,8 +578,10 @@ async function AuthLanding({ error, message }: { error: string; message: string 
           </div>
 
           {(message || error) && (
-            <div className={`status-banner ${error ? "status-banner--error" : ""}`}>
-              {error || message}
+            <div className="status-banner-shell">
+              <div className={`status-banner ${error ? "status-banner--error" : ""}`}>
+                {error || message}
+              </div>
             </div>
           )}
 
@@ -566,6 +671,7 @@ function CustomerWorkspace({
   patients,
   packages,
   documents,
+  pendingIntakeDocuments,
   message,
   error,
   q,
@@ -584,6 +690,7 @@ function CustomerWorkspace({
   customerPatientPhoneFilter,
   customerView,
   intakeStep,
+  intakeDraftKey,
   patientDraft,
   sampleDraft,
   packageDraft,
@@ -591,10 +698,11 @@ function CustomerWorkspace({
   userEmail: string;
   profile: ProfileRow | null;
   company: CompanyRow | null;
-  samples: SampleRow[];
+  samples: AdminSampleRow[];
   patients: PatientRow[];
   packages: PackageRow[];
   documents: DocumentRow[];
+  pendingIntakeDocuments: PendingIntakeDocumentRow[];
   message: string;
   error: string;
   q: string;
@@ -613,6 +721,7 @@ function CustomerWorkspace({
   customerPatientPhoneFilter: string;
   customerView: CustomerView;
   intakeStep: IntakeStep;
+  intakeDraftKey: string;
   patientDraft: IntakePatientDraft;
   sampleDraft: IntakeSampleDraft;
   packageDraft: IntakePackageDraft;
@@ -620,10 +729,32 @@ function CustomerWorkspace({
   const canAdvanceToSample = canAdvanceCustomerToSample(patientDraft);
   const canAdvanceToFiles = canAdvanceCustomerToFiles(patientDraft, sampleDraft);
   const canAdvanceToPackage = canAdvanceToFiles;
-  const patientStepHref = buildPath("/", { customer_view: "intake", intake_step: "patient" });
+  const customerCollectedBy = formatAccountDisplayName(profile?.first_name, profile?.last_name) || userEmail;
+  const sampleSexValue = normalizeSexValue(sampleDraft.sex);
+  const patientStepHref = buildPath("/", {
+    customer_view: "intake",
+    intake_step: "patient",
+    draft_key: intakeDraftKey,
+    patient_id: patientDraft.patientId,
+    first_name: patientDraft.firstName,
+    last_name: patientDraft.lastName,
+    date_of_birth: patientDraft.dateOfBirth,
+    address_line_1: patientDraft.addressLine1,
+    city: patientDraft.city,
+    state: patientDraft.state,
+    postal_code: patientDraft.postalCode,
+    phone_number: patientDraft.phoneNumber,
+    email_address: patientDraft.emailAddress,
+    race_ethnicity: patientDraft.raceEthnicity,
+    weight_lbs: patientDraft.weightLbs,
+    height_inches: patientDraft.heightInches,
+    angioplasty_or_stent: patientDraft.angioplastyOrStent ? "true" : "false",
+    cabg: patientDraft.cabg ? "true" : "false",
+  });
   const sampleStepHref = buildPath("/", {
     customer_view: "intake",
     intake_step: "sample",
+    draft_key: intakeDraftKey,
     patient_id: patientDraft.patientId,
     first_name: patientDraft.firstName,
     last_name: patientDraft.lastName,
@@ -643,6 +774,7 @@ function CustomerWorkspace({
   const filesStepHref = buildPath("/", {
     customer_view: "intake",
     intake_step: "files",
+    draft_key: intakeDraftKey,
     patient_id: patientDraft.patientId,
     first_name: patientDraft.firstName,
     last_name: patientDraft.lastName,
@@ -662,8 +794,8 @@ function CustomerWorkspace({
     collected_at: sampleDraft.collectedAt,
     received_at: sampleDraft.receivedAt,
     status: sampleDraft.status,
-    collected_by: sampleDraft.collectedBy,
-    sex: sampleDraft.sex,
+    collected_by: customerCollectedBy,
+    sex: sampleSexValue,
     ordering_provider_name: sampleDraft.orderingProviderName,
     npi_number: sampleDraft.npiNumber,
     missing_info: sampleDraft.missingInfo,
@@ -678,6 +810,7 @@ function CustomerWorkspace({
   const packageStepHref = buildPath("/", {
     customer_view: "intake",
     intake_step: "package",
+    draft_key: intakeDraftKey,
     patient_id: patientDraft.patientId,
     first_name: patientDraft.firstName,
     last_name: patientDraft.lastName,
@@ -697,8 +830,8 @@ function CustomerWorkspace({
     collected_at: sampleDraft.collectedAt,
     received_at: sampleDraft.receivedAt,
     status: sampleDraft.status,
-    collected_by: sampleDraft.collectedBy,
-    sex: sampleDraft.sex,
+    collected_by: customerCollectedBy,
+    sex: sampleSexValue,
     ordering_provider_name: sampleDraft.orderingProviderName,
     npi_number: sampleDraft.npiNumber,
     missing_info: sampleDraft.missingInfo,
@@ -818,8 +951,10 @@ function CustomerWorkspace({
         )}
 
         {(message || error) && (
-          <div className={`status-banner customer-status-banner ${error ? "status-banner--error" : ""}`}>
-            {error || message}
+          <div className="status-banner-shell status-banner-shell--page">
+            <div className={`status-banner customer-status-banner ${error ? "status-banner--error" : ""}`}>
+              {error || message}
+            </div>
           </div>
         )}
 
@@ -867,7 +1002,7 @@ function CustomerWorkspace({
                   {samples.slice(0, 3).map((sample) => (
                     <div className="list-row" key={sample.id}>
                       <strong>{sample.sample_number}</strong>
-                      <span>{sample.patient_full_name}</span>
+                      <span>{formatSamplePatientName(sample)}</span>
                     </div>
                   ))}
                   {samples.length === 0 && <div className="empty-state">No samples in your scope yet.</div>}
@@ -915,25 +1050,155 @@ function CustomerWorkspace({
             </div>
           </form>
 
-          <div className="table">
-            <div className="table__head">
+          <div className="admin-record-list customer-record-list customer-record-list--samples">
+            <div className="admin-record-list__head">
               <span>Sample</span>
               <span>Patient</span>
               <span>Status</span>
               <span>Collected</span>
               <span>Received</span>
               <span>Package</span>
+              <span></span>
             </div>
-            {samples.map((sample) => (
-              <div className="table__row" key={sample.id}>
-                <span>{sample.sample_number}</span>
-                <span>{sample.patient_full_name}</span>
-                <span>{formatSampleStatus(sample.status, sample.rejected)}</span>
-                <span>{formatDate(sample.collected_at)}</span>
-                <span>{formatDate(sample.received_at)}</span>
-                <span>{sample.package_id ?? "Unassigned"}</span>
-              </div>
-            ))}
+            {samples.map((sample) => {
+              const sampleStatus = normalizeSampleStatus(sample.status);
+              const customerEditableStatus =
+                sampleStatus === "accepted" || sampleStatus === "rejected" ? null : sampleStatus;
+
+              return (
+                <details className="admin-record" key={sample.id}>
+                  <summary className="admin-record__summary">
+                    <div>
+                      <strong>{sample.sample_number}</strong>
+                    </div>
+                    <div>
+                      <strong>{formatSamplePatientName(sample)}</strong>
+                    </div>
+                    <div>
+                      <strong>{formatSampleStatus(sample.status, sample.rejected)}</strong>
+                      {sample.rejected && sample.rejection_reason ? (
+                        <span className="table__subvalue">Reason: {sample.rejection_reason}</span>
+                      ) : null}
+                    </div>
+                    <div>
+                      <strong>{formatDateOnly(sample.collected_at)}</strong>
+                    </div>
+                    <div>
+                      <strong>{formatDateOnly(sample.received_at)}</strong>
+                    </div>
+                    <div>
+                      <strong>{sample.package_id ?? "Unassigned"}</strong>
+                    </div>
+                    <div className="admin-record__actions">
+                      <span className="admin-record__toggle">Edit</span>
+                    </div>
+                  </summary>
+
+                  <form action={updateSampleAction} className="admin-record__details">
+                    <input type="hidden" name="id" value={sample.id} />
+                    <input type="hidden" name="redirect_to" value="/?customer_view=samples" />
+                    {!customerEditableStatus && <input type="hidden" name="status" value={sampleStatus} />}
+                    <div className="form-grid form-grid--compact">
+                      <div className="field field--compact">
+                        <label>Sample number</label>
+                        <input name="sample_number" defaultValue={sample.sample_number} required />
+                      </div>
+                      <div className="field field--compact">
+                        <label>Patient</label>
+                        <input
+                          name="patient_id"
+                          list={`customer-sample-patient-options-${sample.id}`}
+                          defaultValue={`${formatSamplePatientName(sample)} | ${sample.patient_id}`}
+                          required
+                        />
+                        <datalist id={`customer-sample-patient-options-${sample.id}`}>
+                          <PatientLookupOptions patients={patients} />
+                        </datalist>
+                      </div>
+                      <div className="field field--compact">
+                        <label>Package</label>
+                        <input
+                          name="fedex_package_id"
+                          list={`customer-sample-package-options-${sample.id}`}
+                          defaultValue={
+                            sample.fedex_package_id && sample.package_id
+                              ? `${sample.package_id} | ${sample.fedex_package_id}`
+                              : ""
+                          }
+                          placeholder="Type package ID"
+                        />
+                        <datalist id={`customer-sample-package-options-${sample.id}`}>
+                          <PackageLookupOptions packages={packages} />
+                        </datalist>
+                      </div>
+                      <div className="field field--compact">
+                        <label>Status</label>
+                        {customerEditableStatus ? (
+                          <select name="status" defaultValue={customerEditableStatus}>
+                            <option value="submitted">submitted</option>
+                            <option value="mailed">mailed</option>
+                          </select>
+                        ) : (
+                          <input value={formatSampleStatus(sample.status, sample.rejected)} readOnly />
+                        )}
+                      </div>
+                      <div className="field field--compact">
+                        <label>Collected date</label>
+                        <input name="collected_at" type="date" defaultValue={toDateInput(sample.collected_at)} />
+                      </div>
+                      <div className="field field--compact">
+                        <label>Sex</label>
+                        <select name="sex" defaultValue={normalizeSexValue(sample.sex)}>
+                          <option value="">Select sex</option>
+                          <option value="Male">Male</option>
+                          <option value="Female">Female</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="checkbox-row checkbox-row--compact">
+                      <label><input name="hart_cadhs" type="checkbox" defaultChecked={sample.hart_cadhs} /> Hart_CADhs</label>
+                      <label><input name="hart_cve" type="checkbox" defaultChecked={sample.hart_cve} /> Hart_CVE</label>
+                    </div>
+
+                    <Icd10CodeFields values={sample.icd10_codes} compact />
+
+                    <div className="form-subsection form-subsection--compact">
+                      <p className="form-subsection__title">Ordering Provider</p>
+                      <div className="form-grid form-grid--compact">
+                        <div className="field field--compact">
+                          <label>Provider name</label>
+                          <input name="ordering_provider_name" defaultValue={sample.ordering_provider_name ?? ""} />
+                        </div>
+                        <div className="field field--compact">
+                          <label>NPI #</label>
+                          <input name="npi_number" defaultValue={sample.npi_number ?? ""} inputMode="numeric" />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="field field--compact">
+                      <label>Missing info notes</label>
+                      <textarea name="missing_info" rows={2} defaultValue={sample.missing_info ?? ""} />
+                    </div>
+
+                    <div className="admin-record__details-actions">
+                      <button
+                        className="button button--danger button--compact"
+                        type="submit"
+                        formAction={deleteSampleAction}
+                        formNoValidate
+                      >
+                        Delete
+                      </button>
+                      <button className="button button--primary button--compact" type="submit">
+                        Save
+                      </button>
+                    </div>
+                  </form>
+                </details>
+              );
+            })}
             {samples.length === 0 && <div className="empty-state">No samples matched the selected column filters.</div>}
           </div>
         </section>}
@@ -976,24 +1241,114 @@ function CustomerWorkspace({
             </div>
           </form>
 
-          <div className="table table--patients">
-            <div className="table__head">
+          <div className="admin-record-list customer-record-list customer-record-list--patients">
+            <div className="admin-record-list__head">
               <span>Patient</span>
               <span>Date of birth</span>
               <span>Phone</span>
               <span>Email</span>
               <span>Location</span>
               <span>Created</span>
+              <span></span>
             </div>
             {patients.map((patient) => (
-              <div className="table__row" key={patient.id}>
-                <span>{patient.first_name} {patient.last_name}</span>
-                <span>{formatDate(patient.date_of_birth)}</span>
-                <span>{patient.phone_number ?? "Not set"}</span>
-                <span>{patient.email_address ?? "Not set"}</span>
-                <span>{[patient.city, patient.state].filter(Boolean).join(", ") || "Not set"}</span>
-                <span>{formatDate(patient.created_at)}</span>
-              </div>
+              <details className="admin-record" key={patient.id}>
+                <summary className="admin-record__summary">
+                  <div>
+                    <strong>{patient.first_name} {patient.last_name}</strong>
+                  </div>
+                  <div>
+                    <strong>{formatDateOnly(patient.date_of_birth)}</strong>
+                  </div>
+                  <div>
+                    <strong>{patient.phone_number ?? "N/A"}</strong>
+                  </div>
+                  <div>
+                    <strong>{patient.email_address ?? "N/A"}</strong>
+                  </div>
+                  <div>
+                    <strong>{[patient.city, patient.state].filter(Boolean).join(", ") || "N/A"}</strong>
+                  </div>
+                  <div>
+                    <strong>{formatDate(patient.created_at)}</strong>
+                  </div>
+                  <div className="admin-record__actions">
+                    <span className="admin-record__toggle">Edit</span>
+                  </div>
+                </summary>
+
+                <form action={updatePatientAction} className="admin-record__details">
+                  <input type="hidden" name="id" value={patient.id} />
+                  <input type="hidden" name="redirect_to" value="/?customer_view=patients" />
+                  <div className="form-grid form-grid--compact">
+                    <div className="field field--compact">
+                      <label>First name</label>
+                      <input name="first_name" defaultValue={patient.first_name} required />
+                    </div>
+                    <div className="field field--compact">
+                      <label>Last name</label>
+                      <input name="last_name" defaultValue={patient.last_name} required />
+                    </div>
+                    <div className="field field--compact">
+                      <label>Date of birth</label>
+                      <input name="date_of_birth" type="date" defaultValue={toDateInput(patient.date_of_birth)} required />
+                    </div>
+                    <div className="field field--compact">
+                      <label>Street address</label>
+                      <input name="address_line_1" defaultValue={patient.address_line_1 ?? ""} />
+                    </div>
+                    <div className="field field--compact">
+                      <label>City</label>
+                      <input name="city" defaultValue={patient.city ?? ""} />
+                    </div>
+                    <div className="field field--compact">
+                      <label>State</label>
+                      <input name="state" defaultValue={patient.state ?? ""} maxLength={2} />
+                    </div>
+                    <div className="field field--compact">
+                      <label>Zip code</label>
+                      <input name="postal_code" defaultValue={patient.postal_code ?? ""} />
+                    </div>
+                    <div className="field field--compact">
+                      <label>Phone number</label>
+                      <input name="phone_number" defaultValue={patient.phone_number ?? ""} />
+                    </div>
+                    <div className="field field--compact">
+                      <label>Email address</label>
+                      <input name="email_address" type="email" defaultValue={patient.email_address ?? ""} />
+                    </div>
+                    <div className="field field--compact">
+                      <label>Race / ethnicity</label>
+                      <input name="race_ethnicity" defaultValue={patient.race_ethnicity ?? ""} />
+                    </div>
+                    <div className="field field--compact">
+                      <label>Weight (lbs)</label>
+                      <input name="weight_lbs" type="number" step="0.01" defaultValue={patient.weight_lbs ?? ""} />
+                    </div>
+                    <div className="field field--compact">
+                      <label>Height (inches)</label>
+                      <input name="height_inches" type="number" step="0.01" defaultValue={patient.height_inches ?? ""} />
+                    </div>
+                  </div>
+                  <div className="checkbox-row checkbox-row--compact">
+                    <label><input name="angioplasty_or_stent" type="checkbox" defaultChecked={patient.angioplasty_or_stent} /> Angioplasty or Stent</label>
+                    <label><input name="cabg" type="checkbox" defaultChecked={patient.cabg} /> Coronary Artery Bypass Graft (CABG)</label>
+                  </div>
+                  <div className="admin-record__details-actions">
+                    <button
+                      className="button button--danger button--compact"
+                      type="submit"
+                      formAction={deletePatientAction}
+                      formNoValidate
+                    >
+                      Delete
+                    </button>
+                    <button className="button button--primary button--compact" type="submit">
+                      Save
+                    </button>
+                  </div>
+                </form>
+              </details>
             ))}
             {patients.length === 0 && <div className="empty-state">No patients matched the selected filters.</div>}
           </div>
@@ -1033,20 +1388,66 @@ function CustomerWorkspace({
             </div>
           </form>
 
-          <div className="table table--packages">
-            <div className="table__head">
+          <div className="admin-record-list customer-record-list customer-record-list--packages">
+            <div className="admin-record-list__head">
               <span>Package</span>
               <span>Mailed</span>
               <span>Received</span>
               <span>Created</span>
+              <span></span>
             </div>
             {packages.map((fedexPackage) => (
-              <div className="table__row" key={fedexPackage.id}>
-                <span>{fedexPackage.package_id}</span>
-                <span>{formatDate(fedexPackage.mailed_at)}</span>
-                <span>{formatDate(fedexPackage.received_at)}</span>
-                <span>{formatDate(fedexPackage.created_at)}</span>
-              </div>
+              <details className="admin-record" key={fedexPackage.id}>
+                <summary className="admin-record__summary">
+                  <div>
+                    <strong>{fedexPackage.package_id}</strong>
+                  </div>
+                  <div>
+                    <strong>{formatDateOnly(fedexPackage.mailed_at)}</strong>
+                  </div>
+                  <div>
+                    <strong>{formatDateOnly(fedexPackage.received_at)}</strong>
+                  </div>
+                  <div>
+                    <strong>{formatDate(fedexPackage.created_at)}</strong>
+                  </div>
+                  <div className="admin-record__actions">
+                    <span className="admin-record__toggle">Edit</span>
+                  </div>
+                </summary>
+
+                <form action={updatePackageAction} className="admin-record__details">
+                  <input type="hidden" name="id" value={fedexPackage.id} />
+                  <input type="hidden" name="redirect_to" value="/?customer_view=packages" />
+                  <div className="form-grid form-grid--compact">
+                    <div className="field field--compact">
+                      <label>Package ID</label>
+                      <input name="package_id" defaultValue={fedexPackage.package_id} required />
+                    </div>
+                    <div className="field field--compact">
+                      <label>Mailed date</label>
+                      <input name="mailed_at" type="date" defaultValue={toDateInput(fedexPackage.mailed_at)} />
+                    </div>
+                    <div className="field field--compact">
+                      <label>Received date</label>
+                      <input name="received_at" type="date" defaultValue={toDateInput(fedexPackage.received_at)} />
+                    </div>
+                  </div>
+                  <div className="admin-record__details-actions">
+                    <button
+                      className="button button--danger button--compact"
+                      type="submit"
+                      formAction={deletePackageAction}
+                      formNoValidate
+                    >
+                      Delete
+                    </button>
+                    <button className="button button--primary button--compact" type="submit">
+                      Save
+                    </button>
+                  </div>
+                </form>
+              </details>
             ))}
             {packages.length === 0 && <div className="empty-state">No packages matched the selected filters.</div>}
           </div>
@@ -1086,6 +1487,7 @@ function CustomerWorkspace({
             <form className="panel form-panel customer-wizard" method="get">
               <input type="hidden" name="customer_view" value="intake" />
               <input type="hidden" name="intake_step" value="sample" />
+              <input type="hidden" name="draft_key" value={intakeDraftKey} />
               <h3>Find an existing patient or create a new one</h3>
               <div className="field">
                 <label>Existing patient</label>
@@ -1170,6 +1572,7 @@ function CustomerWorkspace({
             <form className="panel form-panel customer-wizard" method="get">
               <input type="hidden" name="customer_view" value="intake" />
               <input type="hidden" name="intake_step" value="files" />
+              <input type="hidden" name="draft_key" value={intakeDraftKey} />
               <input type="hidden" name="patient_id" value={patientDraft.patientId} />
               <input type="hidden" name="first_name" value={patientDraft.firstName} />
               <input type="hidden" name="last_name" value={patientDraft.lastName} />
@@ -1212,13 +1615,14 @@ function CustomerWorkspace({
                 </label>
               </div>
               <div className="form-grid">
-                <div className="field">
-                  <label>Collected by</label>
-                  <input name="collected_by" defaultValue={sampleDraft.collectedBy} />
-                </div>
+                <input type="hidden" name="collected_by" value={customerCollectedBy} />
                 <div className="field">
                   <label>Sex</label>
-                  <input name="sex" defaultValue={sampleDraft.sex} />
+                  <select name="sex" defaultValue={sampleSexValue}>
+                    <option value="">Select sex</option>
+                    <option value="Male">Male</option>
+                    <option value="Female">Female</option>
+                  </select>
                 </div>
                 <Icd10CodeFields values={sampleDraft.icd10Codes} />
               </div>
@@ -1250,7 +1654,7 @@ function CustomerWorkspace({
                 <a className="button button--secondary" href={patientStepHref}>
                   Back to Patient
                 </a>
-                <button className="button button--primary" type="submit" disabled={!canAdvanceToFiles}>
+                <button className="button button--primary" type="submit" disabled={!canAdvanceToSample}>
                   Continue to Files
                 </button>
               </div>
@@ -1259,11 +1663,29 @@ function CustomerWorkspace({
 
           {intakeStep === "files" && (
             <div className="panel form-panel customer-wizard">
-              <h3>Documents are uploaded after the sample is created</h3>
-              <p className="signup-helper-text">
-                To keep every document tied to the correct patient and sample, finish the sample intake first.
-                After submission, use the Documents tab to upload files for that patient and sample.
-              </p>
+              <form action={uploadPendingIntakeDocumentAction} className="customer-intake-files-form">
+                <input type="hidden" name="draft_key" value={intakeDraftKey} />
+                <input type="hidden" name="redirect_to" value={filesStepHref} />
+                <h3>Upload documents for this intake</h3>
+                <div className="field">
+                  <label>File</label>
+                  <input name="document" type="file" accept=".pdf,image/png,image/jpeg" required />
+                </div>
+                <button className="button button--secondary" type="submit" disabled={!canAdvanceToFiles}>
+                  Upload Document
+                </button>
+              </form>
+              <div className="list-grid customer-intake-files-list">
+                {pendingIntakeDocuments.map((document) => (
+                  <div className="list-row" key={document.id}>
+                    <strong>{document.original_filename}</strong>
+                    <span>{formatDateTime(document.created_at)}</span>
+                  </div>
+                ))}
+                {pendingIntakeDocuments.length === 0 && (
+                  <div className="empty-state">No intake documents uploaded yet.</div>
+                )}
+              </div>
               <div className="customer-wizard__actions">
                 <a className="button button--secondary" href={sampleStepHref}>
                   Back to Sample
@@ -1279,6 +1701,7 @@ function CustomerWorkspace({
             <form className="panel form-panel customer-wizard" method="get">
               <input type="hidden" name="customer_view" value="intake" />
               <input type="hidden" name="intake_step" value="review" />
+              <input type="hidden" name="draft_key" value={intakeDraftKey} />
               <input type="hidden" name="patient_id" value={patientDraft.patientId} />
               <input type="hidden" name="first_name" value={patientDraft.firstName} />
               <input type="hidden" name="last_name" value={patientDraft.lastName} />
@@ -1296,8 +1719,8 @@ function CustomerWorkspace({
               <input type="hidden" name="cabg" value={patientDraft.cabg ? "true" : "false"} />
               <input type="hidden" name="sample_number" value={sampleDraft.sampleNumber} />
               <input type="hidden" name="collected_at" value={sampleDraft.collectedAt} />
-              <input type="hidden" name="collected_by" value={sampleDraft.collectedBy} />
-              <input type="hidden" name="sex" value={sampleDraft.sex} />
+              <input type="hidden" name="collected_by" value={customerCollectedBy} />
+              <input type="hidden" name="sex" value={sampleSexValue} />
               <input type="hidden" name="ordering_provider_name" value={sampleDraft.orderingProviderName} />
               <input type="hidden" name="npi_number" value={sampleDraft.npiNumber} />
               <input type="hidden" name="missing_info" value={sampleDraft.missingInfo} />
@@ -1346,6 +1769,7 @@ function CustomerWorkspace({
 
           {intakeStep === "review" && (
             <form action={createCustomerIntakeAction} className="panel form-panel customer-wizard">
+              <input type="hidden" name="draft_key" value={intakeDraftKey} />
               <input type="hidden" name="patient_id" value={patientDraft.patientId} />
               <input type="hidden" name="first_name" value={patientDraft.firstName} />
               <input type="hidden" name="last_name" value={patientDraft.lastName} />
@@ -1363,8 +1787,8 @@ function CustomerWorkspace({
               <input type="hidden" name="cabg" value={patientDraft.cabg ? "true" : "false"} />
               <input type="hidden" name="sample_number" value={sampleDraft.sampleNumber} />
               <input type="hidden" name="collected_at" value={sampleDraft.collectedAt} />
-              <input type="hidden" name="collected_by" value={sampleDraft.collectedBy} />
-              <input type="hidden" name="sex" value={sampleDraft.sex} />
+              <input type="hidden" name="collected_by" value={customerCollectedBy} />
+              <input type="hidden" name="sex" value={sampleSexValue} />
               <input type="hidden" name="ordering_provider_name" value={sampleDraft.orderingProviderName} />
               <input type="hidden" name="npi_number" value={sampleDraft.npiNumber} />
               <input type="hidden" name="missing_info" value={sampleDraft.missingInfo} />
@@ -1396,8 +1820,8 @@ function CustomerWorkspace({
                   <p className="form-subsection__title">Sample</p>
                   <ReviewItem label="Sample number" value={sampleDraft.sampleNumber} />
                   <ReviewItem label="Collected date" value={sampleDraft.collectedAt} />
-                  <ReviewItem label="Collected by" value={sampleDraft.collectedBy} />
-                  <ReviewItem label="Sex" value={sampleDraft.sex} />
+                  <ReviewItem label="Collected by" value={customerCollectedBy} />
+                  <ReviewItem label="Sex" value={sampleSexValue} />
                   <ReviewItem label="Provider" value={sampleDraft.orderingProviderName} />
                   <ReviewItem label="NPI #" value={sampleDraft.npiNumber} />
                 </section>
@@ -1407,6 +1831,10 @@ function CustomerWorkspace({
                   <ReviewItem label="Hart_CADhs" value={sampleDraft.hartCadhs} />
                   <ReviewItem label="Hart_CVE" value={sampleDraft.hartCve} />
                   <ReviewItem label="Missing info notes" value={sampleDraft.missingInfo} />
+                </section>
+                <section className="review-card">
+                  <p className="form-subsection__title">Documents</p>
+                  <ReviewItem label="Uploaded files" value={pendingIntakeDocuments.map((document) => document.original_filename).join(", ")} />
                 </section>
                 <section className="review-card">
                   <p className="form-subsection__title">FedEx</p>
@@ -1430,6 +1858,7 @@ function CustomerWorkspace({
         {customerView === "operations" && <section className="admin-panel customer-panel" id="customer-documents">
           <div className="create-grid">
           <form action={uploadDocumentAction} className="panel form-panel">
+            <input type="hidden" name="redirect_to" value="/?customer_view=operations" />
             <h3>Attach to patient and sample</h3>
             <div className="field">
               <label>Patient</label>
@@ -1467,16 +1896,82 @@ function CustomerWorkspace({
 
           <div className="data-grid">
           <article className="panel panel--wide">
-            <div className="list-grid">
+            <div className="admin-record-list customer-record-list customer-record-list--documents">
+              <div className="admin-record-list__head">
+                <span>File</span>
+                <span>Patient</span>
+                <span>Sample</span>
+                <span>Uploaded</span>
+                <span></span>
+              </div>
               {documents.map((document) => (
-                <div className="list-row" key={document.id}>
-                  <strong>{document.original_filename}</strong>
-                  <span>
-                    {[document.patient_first_name, document.patient_last_name].filter(Boolean).join(" ") || "Patient not found"}
-                    {" | "}
-                    {document.sample_number ?? "Sample not found"}
-                  </span>
-                </div>
+                <details className="admin-record" key={document.id}>
+                  <summary className="admin-record__summary">
+                    <div>
+                      <strong>{document.original_filename}</strong>
+                    </div>
+                    <div>
+                      <strong>{[document.patient_first_name, document.patient_last_name].filter(Boolean).join(" ") || "N/A"}</strong>
+                    </div>
+                    <div>
+                      <strong>{document.sample_number ?? "N/A"}</strong>
+                    </div>
+                    <div>
+                      <strong>{formatDateTime(document.created_at ?? null)}</strong>
+                    </div>
+                    <div className="admin-record__actions">
+                      <span className="admin-record__toggle">Edit</span>
+                    </div>
+                  </summary>
+
+                  <form action={updateDocumentAction} className="admin-record__details">
+                    <input type="hidden" name="id" value={document.id} />
+                    <input type="hidden" name="redirect_to" value="/?customer_view=operations" />
+                    <div className="form-grid form-grid--compact">
+                      <div className="field field--compact">
+                        <label>Patient</label>
+                        <input
+                          name="patient_id"
+                          list={`customer-document-patient-options-${document.id}`}
+                          defaultValue={`${[document.patient_first_name, document.patient_last_name].filter(Boolean).join(" ")} | ${document.patient_id}`}
+                          required
+                        />
+                        <datalist id={`customer-document-patient-options-${document.id}`}>
+                          <PatientLookupOptions patients={patients} />
+                        </datalist>
+                      </div>
+                      <div className="field field--compact">
+                        <label>Sample</label>
+                        <input
+                          name="sample_id"
+                          list={`customer-document-sample-options-${document.id}`}
+                          defaultValue={document.sample_number ? `${document.sample_number} | ${document.sample_id}` : ""}
+                          required
+                        />
+                        <datalist id={`customer-document-sample-options-${document.id}`}>
+                          <SampleLookupOptions samples={samples} />
+                        </datalist>
+                      </div>
+                      <div className="field field--compact">
+                        <label>File</label>
+                        <input value={document.original_filename} readOnly />
+                      </div>
+                    </div>
+                    <div className="admin-record__details-actions">
+                      <button
+                        className="button button--danger button--compact"
+                        type="submit"
+                        formAction={deleteDocumentAction}
+                        formNoValidate
+                      >
+                        Delete
+                      </button>
+                      <button className="button button--primary button--compact" type="submit">
+                        Save
+                      </button>
+                    </div>
+                  </form>
+                </details>
               ))}
               {documents.length === 0 && <div className="empty-state">No documents uploaded yet.</div>}
             </div>
@@ -1522,28 +2017,47 @@ function CustomerWorkspace({
                 </button>
               </form>
 
-              <article className="panel">
+              <form action={updateCompanyAction} className="panel form-panel">
+                <input type="hidden" name="redirect_to" value="/?customer_view=account" />
                 <h3>Clinic Details</h3>
-                <div className="list-grid">
-                  <div className="list-row">
-                    <strong>Clinic</strong>
-                    <span>{company?.name ?? "Clinic not assigned"}</span>
+                <div className="form-grid">
+                  <div className="field">
+                    <label>Clinic name</label>
+                    <input name="name" defaultValue={company?.name ?? ""} />
                   </div>
-                  <div className="list-row">
-                    <strong>Address</strong>
-                    <span>
-                      {[company?.address_line_1, company?.city, company?.state, company?.postal_code]
-                        .filter(Boolean)
-                        .join(", ") || "Not provided"}
-                    </span>
+                  <div className="field">
+                    <label>Street address</label>
+                    <input name="address_line_1" defaultValue={company?.address_line_1 ?? ""} />
                   </div>
-                  <div className="list-row">
-                    <strong>Clinic Contact</strong>
-                    <span>{company?.contact_phone ?? "Phone not provided"}</span>
-                    <span>{company?.contact_email ?? "Email not provided"}</span>
+                  <div className="field">
+                    <label>City</label>
+                    <input name="city" defaultValue={company?.city ?? ""} />
+                  </div>
+                  <div className="field">
+                    <label>State</label>
+                    <input name="state" defaultValue={company?.state ?? ""} maxLength={2} />
+                  </div>
+                  <div className="field">
+                    <label>Zip code</label>
+                    <input name="postal_code" defaultValue={company?.postal_code ?? ""} />
+                  </div>
+                  <div className="field">
+                    <label>Clinic Contact Email</label>
+                    <input name="contact_email" type="email" defaultValue={company?.contact_email ?? ""} />
+                  </div>
+                  <div className="field">
+                    <label>Clinic Contact</label>
+                    <input name="contact_phone" defaultValue={company?.contact_phone ?? ""} />
+                  </div>
+                  <div className="field">
+                    <label>Fax Number</label>
+                    <input name="fax_number" defaultValue={company?.fax_number ?? ""} />
                   </div>
                 </div>
-              </article>
+                <button className="button button--primary" type="submit">
+                  Save Clinic
+                </button>
+              </form>
             </div>
           </section>
         )}
@@ -2259,8 +2773,10 @@ export function AdminWorkspace({
         </div>
 
         {(message || error) && (
-          <div className={`status-banner ${error ? "status-banner--error" : ""}`}>
-            {error || message}
+          <div className="status-banner-shell status-banner-shell--page">
+            <div className={`status-banner ${error ? "status-banner--error" : ""}`}>
+              {error || message}
+            </div>
           </div>
         )}
 
@@ -2271,22 +2787,22 @@ export function AdminWorkspace({
           </div>
 
           <div className="admin-kpis">
-            <article>
+            <a className="admin-kpi-card" href="/admin/clinics">
               <span>{companies.length}</span>
               <p>Clinics</p>
-            </article>
-            <article>
+            </a>
+            <a className="admin-kpi-card" href="/admin/accounts">
               <span>{accounts.length}</span>
               <p>Users</p>
-            </article>
-            <article>
+            </a>
+            <a className="admin-kpi-card" href="/admin/samples">
               <span>{samples.length}</span>
               <p>Visible samples</p>
-            </article>
-            <article>
+            </a>
+            <a className="admin-kpi-card" href="/admin/documents">
               <span>{documents.length}</span>
               <p>Documents</p>
-            </article>
+            </a>
           </div>
 
         </section>
@@ -2295,13 +2811,13 @@ export function AdminWorkspace({
           <article className="panel admin-overview-card admin-overview-card--inbox">
             <div className="panel__header">
               <div>
-                <h3>Contact Messages</h3>
+                <h3><a className="admin-overview-heading-link" href="/admin/contact">Contact Messages</a></h3>
               </div>
               <span className="admin-overview-count">{contactMessages.length}</span>
             </div>
             <div className="list-grid">
               {contactMessages.slice(0, 3).map((contactMessage) => (
-                <div className="list-row" key={contactMessage.id}>
+                <a className="list-row admin-overview-link" href="/admin/contact" key={contactMessage.id}>
                   <strong>
                     {[contactMessage.first_name, contactMessage.last_name].filter(Boolean).join(" ") ||
                       contactMessage.email}
@@ -2311,7 +2827,7 @@ export function AdminWorkspace({
                     {" | "}
                     {contactMessage.company_name ?? contactMessage.institution ?? "No clinic listed"}
                   </span>
-                </div>
+                </a>
               ))}
               {contactMessages.length === 0 && <div className="empty-state">No contact messages yet.</div>}
             </div>
@@ -2320,13 +2836,13 @@ export function AdminWorkspace({
           <article className="panel admin-overview-card">
             <div className="panel__header">
               <div>
-                <h3>Clinic Requests</h3>
+                <h3><a className="admin-overview-heading-link" href="/admin/clinics">Clinic Requests</a></h3>
               </div>
               <span className="admin-overview-count">{pendingClinicRequests.length}</span>
             </div>
             <div className="list-grid">
               {pendingClinicRequests.map((request) => (
-                <div className="list-row" key={request.id}>
+                <a className="list-row admin-overview-link" href="/admin/clinics" key={request.id}>
                   <strong>{request.clinic_name}</strong>
                   <span>
                     Clinic request
@@ -2335,7 +2851,7 @@ export function AdminWorkspace({
                     {" | "}
                     {request.requester_email}
                   </span>
-                </div>
+                </a>
               ))}
               {pendingClinicRequests.length === 0 && <div className="empty-state">No pending clinic requests.</div>}
             </div>
@@ -2352,10 +2868,10 @@ export function AdminWorkspace({
             </div>
             <div className="today-activity-grid">
               <section>
-                <h4>Samples</h4>
+                <h4><a className="admin-overview-heading-link" href="/admin/samples">Samples</a></h4>
                 <div className="list-grid">
                   {todaySamples.map((sample) => (
-                    <div className="list-row" key={sample.id}>
+                    <a className="list-row admin-overview-link" href="/admin/samples" key={sample.id}>
                       <strong>{sample.sample_number}</strong>
                       <span>
                         {sample.patient_first_name} {sample.patient_last_name}
@@ -2364,17 +2880,17 @@ export function AdminWorkspace({
                         {" | "}
                         {formatDateTime(sample.created_at)}
                       </span>
-                    </div>
+                    </a>
                   ))}
                   {todaySamples.length === 0 && <div className="empty-state">No samples created today.</div>}
                 </div>
               </section>
 
               <section>
-                <h4>Documents</h4>
+                <h4><a className="admin-overview-heading-link" href="/admin/documents">Documents</a></h4>
                 <div className="list-grid">
                   {todayDocuments.map((document) => (
-                    <div className="list-row" key={document.id}>
+                    <a className="list-row admin-overview-link" href="/admin/documents" key={document.id}>
                       <strong>{document.original_filename}</strong>
                       <span>
                         {document.sample_number ?? "No sample"}
@@ -2383,24 +2899,24 @@ export function AdminWorkspace({
                         {" | "}
                         {formatDateTime(document.created_at ?? null)}
                       </span>
-                    </div>
+                    </a>
                   ))}
                   {todayDocuments.length === 0 && <div className="empty-state">No documents created today.</div>}
                 </div>
               </section>
 
               <section>
-                <h4>Patients</h4>
+                <h4><a className="admin-overview-heading-link" href="/admin/patients">Patients</a></h4>
                 <div className="list-grid">
                   {todayPatients.map((patient) => (
-                    <div className="list-row" key={patient.id}>
+                    <a className="list-row admin-overview-link" href="/admin/patients" key={patient.id}>
                       <strong>{patient.first_name} {patient.last_name}</strong>
                       <span>
-                        DOB {formatDate(patient.date_of_birth)}
+                        DOB {formatDateOnly(patient.date_of_birth)}
                         {" | "}
                         {formatDateTime(patient.created_at)}
                       </span>
-                    </div>
+                    </a>
                   ))}
                   {todayPatients.length === 0 && <div className="empty-state">No patients created today.</div>}
                 </div>
@@ -2462,21 +2978,21 @@ export function AdminWorkspace({
                     <strong>{companyNameById.get(patient.company_id) ?? "Clinic not found"}</strong>
                   </div>
                   <div>
-                    <strong>{formatDate(patient.date_of_birth)}</strong>
+                    <strong>{formatDateOnly(patient.date_of_birth)}</strong>
                   </div>
                   <div>
-                    <strong>{patient.phone_number ?? "Not set"}</strong>
+                    <strong>{patient.phone_number ?? "N/A"}</strong>
                     <span>{patient.email_address ?? "Email not set"}</span>
                   </div>
                   <div>
-                    <strong>{[patient.city, patient.state].filter(Boolean).join(", ") || "Not set"}</strong>
+                    <strong>{[patient.city, patient.state].filter(Boolean).join(", ") || "N/A"}</strong>
                     <span>{patient.postal_code ?? "Zip not set"}</span>
                   </div>
                   <div>
-                    <strong>{patient.weight_lbs ? `${patient.weight_lbs} lbs` : "Not set"}</strong>
+                    <strong>{patient.weight_lbs ? `${patient.weight_lbs} lbs` : "N/A"}</strong>
                   </div>
                   <div>
-                    <strong>{patient.height_inches ? `${patient.height_inches} in` : "Not set"}</strong>
+                    <strong>{patient.height_inches ? `${patient.height_inches} in` : "N/A"}</strong>
                   </div>
                   <div>
                     <strong>{patient.angioplasty_or_stent ? "Stent: Yes" : "Stent: No"}</strong>
@@ -2560,6 +3076,14 @@ export function AdminWorkspace({
                       <label><input name="cabg" type="checkbox" defaultChecked={patient.cabg} /> Coronary Artery Bypass Graft (CABG)</label>
                     </div>
                     <div className="admin-record__details-actions">
+                      <button
+                        className="button button--danger button--compact"
+                        type="submit"
+                        formAction={deletePatientAction}
+                        formNoValidate
+                      >
+                        Delete Patient
+                      </button>
                       <button className="button button--primary button--compact" type="submit">
                         Save Patient
                       </button>
@@ -2671,6 +3195,14 @@ export function AdminWorkspace({
                       </div>
                     </div>
                     <div className="admin-record__details-actions">
+                      <button
+                        className="button button--danger button--compact"
+                        type="submit"
+                        formAction={deletePackageAction}
+                        formNoValidate
+                      >
+                        Delete Package
+                      </button>
                       <button className="button button--primary button--compact" type="submit">
                         Save Package
                       </button>
@@ -2750,6 +3282,29 @@ export function AdminWorkspace({
                     </summary>
 
                     <div className="incoming-sample-card__details">
+                      {!reviewReady && (
+                        <div className="incoming-sample-card__receive-bar">
+                          <div className="incoming-sample-card__alert">
+                            This sample must be marked received before it can be accepted or rejected.
+                          </div>
+                          <form action={markSampleReceivedAction} className="incoming-sample-card__receive-form">
+                            <input type="hidden" name="id" value={sample.id} />
+                            <input type="hidden" name="redirect_to" value="/admin/samples" />
+                            <div className="field field--compact">
+                              <label>Received date</label>
+                              <input
+                                name="received_at"
+                                type="date"
+                                defaultValue={toDateInput(sample.received_at) || todayDateInput()}
+                                required
+                              />
+                            </div>
+                            <button className="button button--primary button--compact" type="submit">
+                              Mark Received
+                            </button>
+                          </form>
+                        </div>
+                      )}
                       <div className="incoming-sample-card__details-grid">
                         <div>
                           <strong>Patient</strong>
@@ -2765,19 +3320,19 @@ export function AdminWorkspace({
                         </div>
                         <div>
                           <strong>Sex</strong>
-                          <span>{sample.sex ?? "Not set"}</span>
+                          <span>{sample.sex ?? "N/A"}</span>
                         </div>
                         <div>
                           <strong>Collected</strong>
-                          <span>{formatDate(sample.collected_at)}</span>
+                          <span>{formatDateOnly(sample.collected_at)}</span>
                         </div>
                         <div>
                           <strong>Received</strong>
-                          <span>{formatDate(sample.received_at)}</span>
+                          <span>{formatDateOnly(sample.received_at)}</span>
                         </div>
                         <div>
                           <strong>Collected by</strong>
-                          <span>{sample.collected_by ?? "Not set"}</span>
+                          <span>{sample.collected_by ?? "N/A"}</span>
                         </div>
                         <div>
                           <strong>Package</strong>
@@ -2785,11 +3340,11 @@ export function AdminWorkspace({
                         </div>
                         <div>
                           <strong>Provider</strong>
-                          <span>{sample.ordering_provider_name ?? "Not set"}</span>
+                          <span>{sample.ordering_provider_name ?? "N/A"}</span>
                         </div>
                         <div>
                           <strong>NPI #</strong>
-                          <span>{sample.npi_number ?? "Not set"}</span>
+                          <span>{sample.npi_number ?? "N/A"}</span>
                         </div>
                         <div>
                           <strong>Hart CADhs</strong>
@@ -2801,18 +3356,13 @@ export function AdminWorkspace({
                         </div>
                         <div className="incoming-sample-card__details-grid-item incoming-sample-card__details-grid-item--wide">
                           <strong>ICD-10 Codes</strong>
-                          <span>{sample.icd10_codes.length > 0 ? sample.icd10_codes.join(", ") : "Not set"}</span>
+                          <span>{sample.icd10_codes.length > 0 ? sample.icd10_codes.join(", ") : "N/A"}</span>
                         </div>
                         <div className="incoming-sample-card__details-grid-item incoming-sample-card__details-grid-item--wide">
                           <strong>Missing info notes</strong>
                           <span>{sample.missing_info ?? "None"}</span>
                         </div>
                       </div>
-                      {!reviewReady && (
-                        <div className="incoming-sample-card__alert">
-                          This sample must be marked received before it can be accepted or rejected.
-                        </div>
-                      )}
                       {reviewOverdue && (
                         <div className="incoming-sample-card__alert incoming-sample-card__alert--warning">
                           This sample was received more than 5 days ago and is still waiting for review.
@@ -2828,14 +3378,25 @@ export function AdminWorkspace({
                               Accept
                             </button>
                           </form>
-                          <form action={reviewIncomingSampleAction}>
-                            <input type="hidden" name="id" value={sample.id} />
-                            <input type="hidden" name="decision" value="reject" />
-                            <input type="hidden" name="redirect_to" value="/admin/samples" />
-                            <button className="button button--ghost button--compact" type="submit">
+                          <details className="incoming-sample-card__reject-details">
+                            <summary className="button button--ghost button--compact">
                               Reject
-                            </button>
-                          </form>
+                            </summary>
+                            <form action={reviewIncomingSampleAction} className="incoming-sample-card__reject-form">
+                              <input type="hidden" name="id" value={sample.id} />
+                              <input type="hidden" name="decision" value="reject" />
+                              <input type="hidden" name="redirect_to" value="/admin/samples" />
+                              <textarea
+                                name="rejection_reason"
+                                rows={2}
+                                placeholder="Why is this sample being rejected?"
+                                required
+                              />
+                              <button className="button button--ghost button--compact" type="submit">
+                                Confirm Reject
+                              </button>
+                            </form>
+                          </details>
                         </div>
                       )}
                     </div>
@@ -2917,7 +3478,7 @@ export function AdminWorkspace({
                     <strong>{formatSampleStatus(sample.status, sample.rejected)}</strong>
                   </div>
                   <div>
-                    <strong>{sample.sex ?? "Not set"}</strong>
+                    <strong>{sample.sex ?? "N/A"}</strong>
                   </div>
                   <div>
                     <strong>{sample.hart_cadhs ? "Yes" : "No"}</strong>
@@ -2926,10 +3487,10 @@ export function AdminWorkspace({
                     <strong>{sample.hart_cve ? "Yes" : "No"}</strong>
                   </div>
                   <div>
-                    <strong>{sample.collected_at ? formatDate(sample.collected_at) : "Not collected"}</strong>
+                    <strong>{sample.collected_at ? formatDateOnly(sample.collected_at) : "Not collected"}</strong>
                   </div>
                   <div>
-                    <strong>{sample.received_at ? formatDate(sample.received_at) : "Not received"}</strong>
+                    <strong>{sample.received_at ? formatDateOnly(sample.received_at) : "Not received"}</strong>
                   </div>
                   <div className="admin-record__actions">
                     <span className="admin-record__toggle">Edit</span>
@@ -3016,7 +3577,11 @@ export function AdminWorkspace({
                     </div>
                     <div className="field field--compact">
                       <label>Sex</label>
-                      <input name="sex" defaultValue={sample.sex ?? ""} />
+                      <select name="sex" defaultValue={normalizeSexValue(sample.sex)}>
+                        <option value="">Select sex</option>
+                        <option value="Male">Male</option>
+                        <option value="Female">Female</option>
+                      </select>
                     </div>
                   </div>
                   <Icd10CodeFields values={sample.icd10_codes} compact />
@@ -3045,6 +3610,14 @@ export function AdminWorkspace({
                     <textarea name="missing_info" rows={2} defaultValue={sample.missing_info ?? ""} />
                   </div>
                   <div className="admin-record__details-actions">
+                    <button
+                      className="button button--danger button--compact"
+                      type="submit"
+                      formAction={deleteSampleAction}
+                      formNoValidate
+                    >
+                      Delete Sample
+                    </button>
                     <button className="button button--primary button--compact" type="submit">
                       Save
                     </button>
@@ -3133,7 +3706,11 @@ export function AdminWorkspace({
               </div>
               <div className="field">
                 <label>Sex</label>
-                <input name="sex" defaultValue={sampleDraft.sex} />
+                <select name="sex" defaultValue={normalizeSexValue(sampleDraft.sex)}>
+                  <option value="">Select sex</option>
+                  <option value="Male">Male</option>
+                  <option value="Female">Female</option>
+                </select>
               </div>
             </div>
 
@@ -3327,6 +3904,7 @@ export function AdminWorkspace({
           </div>
 
           <div className="data-grid">
+          <PendingAccountRequestsPanel accounts={accounts} userEmailById={userEmailById} />
           <article className="panel panel--wide">
             <h3>User Profiles</h3>
             <div className="admin-record-list admin-record-list--accounts">
@@ -3416,6 +3994,14 @@ export function AdminWorkspace({
                     <span>Admins are not attached to a clinic.</span>
                   )}
                     <div className="admin-record__details-actions">
+                      <button
+                        className="button button--danger button--compact"
+                        type="submit"
+                        formAction={deleteUserProfileAction}
+                        formNoValidate
+                      >
+                        Delete User
+                      </button>
                       <button className="button button--primary button--compact" type="submit">
                         Save User
                       </button>
@@ -3469,10 +4055,10 @@ export function AdminWorkspace({
               <div>
                 <h3>Clinic Requests</h3>
               </div>
-              <span>{clinicRequests.length} requests</span>
+              <span className="admin-overview-count">{pendingClinicRequests.length} requests</span>
             </div>
             <div className="list-grid">
-              {clinicRequests.map((request) => (
+              {pendingClinicRequests.map((request) => (
                 <div className="list-row clinic-request-row" key={request.id}>
                   <div>
                     <strong>{request.clinic_name}</strong>
@@ -3490,7 +4076,7 @@ export function AdminWorkspace({
                   <div>
                     <strong>{request.requester_first_name} {request.requester_last_name}</strong>
                     <span>{request.requester_email}</span>
-                    <span>{request.status}</span>
+                    <span className="clinic-request-row__status">{request.status}</span>
                   </div>
                   {request.notes && <p>{request.notes}</p>}
                   <div className="clinic-request-row__actions">
@@ -3519,7 +4105,7 @@ export function AdminWorkspace({
                   </div>
                 </div>
               ))}
-              {clinicRequests.length === 0 && <div className="empty-state">No clinic requests yet.</div>}
+              {pendingClinicRequests.length === 0 && <div className="empty-state">No pending clinic requests.</div>}
             </div>
           </article>}
 
@@ -3598,6 +4184,14 @@ export function AdminWorkspace({
                     </div>
                   </div>
                   <div className="admin-record__details-actions">
+                    <button
+                      className="button button--danger button--compact"
+                      type="submit"
+                      formAction={deleteCompanyAction}
+                      formNoValidate
+                    >
+                      Delete Clinic
+                    </button>
                     <button className="button button--primary button--compact" type="submit">
                       Save Clinic
                     </button>
@@ -3625,15 +4219,24 @@ export function AdminWorkspace({
             </form>
             <div className="list-grid">
               {documents.map((document) => (
-                <div className="list-row" key={document.id}>
-                  <strong>{document.original_filename}</strong>
-                  <span>
-                    {[document.patient_first_name, document.patient_last_name].filter(Boolean).join(" ")}
-                    {" | "}
-                    {document.sample_number}
-                    {" | "}
-                    {document.company_name}
-                  </span>
+                <div className="list-row document-directory-row" key={document.id}>
+                  <div>
+                    <strong>{document.original_filename}</strong>
+                    <span>
+                      {[document.patient_first_name, document.patient_last_name].filter(Boolean).join(" ")}
+                      {" | "}
+                      {document.sample_number}
+                      {" | "}
+                      {document.company_name}
+                    </span>
+                  </div>
+                  <form action={deleteDocumentAction} className="list-row__actions">
+                    <input type="hidden" name="id" value={document.id} />
+                    <input type="hidden" name="redirect_to" value="/admin/documents" />
+                    <button className="button button--danger button--compact" type="submit">
+                      Delete
+                    </button>
+                  </form>
                 </div>
               ))}
               {documents.length === 0 && <div className="empty-state">No documents found.</div>}
@@ -3714,6 +4317,13 @@ export function AdminWorkspace({
                 </div>
                 <p>{contactMessage.message}</p>
                 {contactMessage.source && <span>Source: {contactMessage.source}</span>}
+                <form action={deleteContactMessageAction} className="contact-message-card__actions">
+                  <input type="hidden" name="id" value={contactMessage.id} />
+                  <input type="hidden" name="redirect_to" value="/admin/contact" />
+                  <button className="button button--danger button--compact" type="submit">
+                    Delete Message
+                  </button>
+                </form>
               </article>
             ))}
             {contactMessages.length === 0 && <div className="empty-state">No contact messages yet.</div>}
@@ -3747,6 +4357,7 @@ export default async function Home({ searchParams }: { searchParams: SearchParam
   const rejectedFilter = readParam(resolvedSearchParams, "rejected");
   const customerView = normalizeCustomerView(readParam(resolvedSearchParams, "customer_view"));
   const intakeStep = normalizeIntakeStep(readParam(resolvedSearchParams, "intake_step"));
+  const intakeDraftKey = readParam(resolvedSearchParams, "draft_key") || randomUUID();
   const patientDraft: IntakePatientDraft = {
     patientId: readParam(resolvedSearchParams, "patient_id"),
     firstName: readParam(resolvedSearchParams, "first_name"),
@@ -3820,14 +4431,21 @@ export default async function Home({ searchParams }: { searchParams: SearchParam
     : Promise.resolve({ data: null });
 
   let sampleQuery = supabase
-    .from("sample_search")
-    .select("id, sample_number, status, rejected, collected_at, received_at, patient_full_name, company_name, package_id")
-    .order("collected_at", { ascending: false });
+    .from("admin_sample_directory")
+    .select(
+      "id, sample_number, company_id, company_name, patient_id, patient_first_name, patient_last_name, fedex_package_id, package_id, status, rejected, rejection_reason, received_at, collected_at, collected_by, sex, missing_info, icd10_codes, ordering_provider_name, npi_number, hart_cadhs, hart_cve, created_at",
+    )
+    .order("collected_at", { ascending: false })
+    .limit(250);
+
+  if (profile?.company_id) {
+    sampleQuery = sampleQuery.eq("company_id", profile.company_id);
+  }
 
   if (q) {
     const safeQuery = q.replace(/[,]/g, " ");
     sampleQuery = sampleQuery.or(
-      `patient_full_name.ilike.%${safeQuery}%,sample_number.ilike.%${safeQuery}%,package_id.ilike.%${safeQuery}%`,
+      `patient_first_name.ilike.%${safeQuery}%,patient_last_name.ilike.%${safeQuery}%,sample_number.ilike.%${safeQuery}%,package_id.ilike.%${safeQuery}%`,
     );
   }
 
@@ -3836,11 +4454,14 @@ export default async function Home({ searchParams }: { searchParams: SearchParam
   }
 
   if (patientFilter) {
-    sampleQuery = sampleQuery.ilike("patient_full_name", `%${patientFilter}%`);
+    const safePatient = patientFilter.replace(/[,]/g, " ");
+    sampleQuery = sampleQuery.or(`patient_first_name.ilike.%${safePatient}%,patient_last_name.ilike.%${safePatient}%`);
   }
 
-  if (sampleStatusFilter) {
-    sampleQuery = sampleQuery.ilike("status", `%${sampleStatusFilter}%`);
+  const normalizedCustomerSampleStatusFilter = normalizeSampleStatusFilter(sampleStatusFilter);
+
+  if (normalizedCustomerSampleStatusFilter) {
+    sampleQuery = sampleQuery.eq("status", normalizedCustomerSampleStatusFilter);
   }
 
   if (packageFilter) {
@@ -3908,7 +4529,9 @@ export default async function Home({ searchParams }: { searchParams: SearchParam
     }
   }
 
-  const [companyResult, samplesResult, patientsResult, packagesResult, documentsResult] = await Promise.all([
+  const admin = createSupabaseAdminClient();
+
+  const [companyResult, samplesResult, patientsResult, packagesResult, documentsResult, pendingIntakeDocumentsResult] = await Promise.all([
     companyPromise,
     sampleQuery,
     patientQuery,
@@ -3917,7 +4540,14 @@ export default async function Home({ searchParams }: { searchParams: SearchParam
       .from("document_directory")
       .select("id, company_id, company_name, patient_id, patient_first_name, patient_last_name, sample_id, sample_number, original_filename, storage_path, created_at")
       .order("created_at", { ascending: false })
-      .limit(6),
+      .limit(250),
+    admin
+      .from("pending_intake_documents")
+      .select("id, draft_key, original_filename, storage_path, created_at")
+      .eq("user_id", user.id)
+      .eq("company_id", profile?.company_id ?? "00000000-0000-0000-0000-000000000000")
+      .eq("draft_key", intakeDraftKey)
+      .order("created_at", { ascending: false }),
   ]);
 
   return (
@@ -3925,10 +4555,11 @@ export default async function Home({ searchParams }: { searchParams: SearchParam
       userEmail={user.email ?? "Unknown email"}
       profile={profile}
       company={(companyResult.data ?? null) as CompanyRow | null}
-      samples={(samplesResult.data ?? []) as SampleRow[]}
+      samples={(samplesResult.data ?? []) as AdminSampleRow[]}
       patients={(patientsResult.data ?? []) as PatientRow[]}
       packages={(packagesResult.data ?? []) as PackageRow[]}
       documents={(documentsResult.data ?? []) as DocumentRow[]}
+      pendingIntakeDocuments={(pendingIntakeDocumentsResult.data ?? []) as PendingIntakeDocumentRow[]}
       message={message}
       error={error}
       q={q}
@@ -3947,6 +4578,7 @@ export default async function Home({ searchParams }: { searchParams: SearchParam
       customerPatientPhoneFilter={customerPatientPhoneFilter}
       customerView={customerView}
       intakeStep={intakeStep}
+      intakeDraftKey={intakeDraftKey}
       patientDraft={patientDraft}
       sampleDraft={sampleDraft}
       packageDraft={packageDraft}
