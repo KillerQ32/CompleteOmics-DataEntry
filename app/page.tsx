@@ -1623,8 +1623,8 @@ function CustomerWorkspace({
                     <option value="Female">Female</option>
                   </select>
                 </div>
-                <Icd10CodeFields values={sampleDraft.icd10Codes} />
               </div>
+              <Icd10CodeFields values={sampleDraft.icd10Codes} />
                 <div className="form-subsection">
                   <p className="form-subsection__title">Ordering Provider</p>
                   <div className="form-grid">

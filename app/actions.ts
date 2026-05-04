@@ -19,6 +19,16 @@ type SessionProfile = {
   last_name: string | null;
 };
 
+type RestorableUserProfile = {
+  id: string;
+  company_id: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  role: "admin" | "clinic_admin" | "customer";
+  account_status: "pending" | "approved" | "denied";
+  notes: string | null;
+};
+
 function getProfileDisplayName(profile: Pick<SessionProfile, "first_name" | "last_name">) {
   const parts = [profile.first_name?.trim(), profile.last_name?.trim()].filter(Boolean);
   return parts.length > 0 ? parts.join(" ") : null;
@@ -32,6 +42,148 @@ function getValue(formData: FormData, key: string) {
 function optionalValue(formData: FormData, key: string) {
   const value = getValue(formData, key);
   return value.length > 0 ? value : null;
+}
+
+function normalizeEmailAddress(value: string | null) {
+  return value?.trim().toLowerCase() ?? "";
+}
+
+function withCleanupWarning(message: string, cleanupSucceeded: boolean, subject: string) {
+  return cleanupSucceeded
+    ? message
+    : `${message} Cleanup also failed for the partial ${subject}; please review it in the admin portal.`;
+}
+
+function cleanupWarningText(cleanupSucceeded: boolean, subject: string) {
+  return cleanupSucceeded
+    ? ""
+    : `Cleanup also failed for the partial ${subject}; please review it in the admin portal.`;
+}
+
+async function deleteAuthUserBestEffort(admin: ReturnType<typeof createSupabaseAdminClient>, userId: string) {
+  try {
+    const { error } = await admin.auth.admin.deleteUser(userId);
+
+    if (error) {
+      console.error("Failed to remove partial auth user", { userId, error: error.message });
+      return false;
+    }
+
+    return true;
+  } catch (error) {
+    console.error("Failed to remove partial auth user", { userId, error });
+    return false;
+  }
+}
+
+async function deleteCompanyBestEffort(admin: ReturnType<typeof createSupabaseAdminClient>, companyId: string) {
+  try {
+    const { error } = await admin.from("companies").delete().eq("id", companyId);
+
+    if (error) {
+      console.error("Failed to remove partial clinic", { companyId, error: error.message });
+      return false;
+    }
+
+    return true;
+  } catch (error) {
+    console.error("Failed to remove partial clinic", { companyId, error });
+    return false;
+  }
+}
+
+async function restoreUserProfileBestEffort(
+  admin: ReturnType<typeof createSupabaseAdminClient>,
+  profile: RestorableUserProfile | null,
+) {
+  if (!profile) {
+    return true;
+  }
+
+  try {
+    const { error } = await admin
+      .from("user_profiles")
+      .update({
+        company_id: profile.company_id,
+        first_name: profile.first_name,
+        last_name: profile.last_name,
+        role: profile.role,
+        account_status: profile.account_status,
+        notes: profile.notes,
+      })
+      .eq("id", profile.id);
+
+    if (error) {
+      console.error("Failed to restore user profile", { profileId: profile.id, error: error.message });
+      return false;
+    }
+
+    return true;
+  } catch (error) {
+    console.error("Failed to restore user profile", { profileId: profile.id, error });
+    return false;
+  }
+}
+
+async function ensureClinicRequestAvailability(
+  admin: ReturnType<typeof createSupabaseAdminClient>,
+  {
+    clinicName,
+    requesterEmail,
+    redirectPath,
+  }: {
+    clinicName: string;
+    requesterEmail: string;
+    redirectPath: string;
+  },
+) {
+  const normalizedClinicName = clinicName.trim();
+  const normalizedRequesterEmail = normalizeEmailAddress(requesterEmail);
+
+  const [
+    { data: existingCompany, error: existingCompanyError },
+    { data: existingClinicRequest, error: existingClinicRequestError },
+    { data: existingEmailRequest, error: existingEmailRequestError },
+  ] = await Promise.all([
+    admin.from("companies").select("id").ilike("name", normalizedClinicName).limit(1).maybeSingle(),
+    admin
+      .from("clinic_requests")
+      .select("id")
+      .ilike("clinic_name", normalizedClinicName)
+      .in("status", ["pending", "reviewing"])
+      .limit(1)
+      .maybeSingle(),
+    admin
+      .from("clinic_requests")
+      .select("id")
+      .ilike("requester_email", normalizedRequesterEmail)
+      .in("status", ["pending", "reviewing"])
+      .limit(1)
+      .maybeSingle(),
+  ]);
+
+  if (existingCompanyError || existingClinicRequestError || existingEmailRequestError) {
+    redirectWithPath(
+      redirectPath,
+      "error",
+      existingCompanyError?.message
+        ?? existingClinicRequestError?.message
+        ?? existingEmailRequestError?.message
+        ?? "Clinic availability could not be checked.",
+    );
+  }
+
+  if (existingCompany) {
+    redirectWithPath(redirectPath, "error", "A clinic with this name already exists.");
+  }
+
+  if (existingClinicRequest) {
+    redirectWithPath(redirectPath, "error", "A request for this clinic is already pending admin review.");
+  }
+
+  if (existingEmailRequest) {
+    redirectWithPath(redirectPath, "error", "A clinic request is already pending for this email address.");
+  }
 }
 
 async function findAuthUserByEmail(email: string) {
@@ -414,7 +566,8 @@ export async function signUpAction(formData: FormData) {
   });
 
   if (profileError) {
-    redirectWithPath(redirectPath, "error", profileError.message);
+    const cleanedUp = await deleteAuthUserBestEffort(admin, userId);
+    redirectWithPath(redirectPath, "error", withCleanupWarning(profileError.message, cleanedUp, "account"));
   }
 
   revalidatePath("/");
@@ -424,14 +577,22 @@ export async function signUpAction(formData: FormData) {
 export async function requestClinicAction(formData: FormData) {
   const admin = createSupabaseAdminClient();
   const redirectPath = getRedirectPath(formData, "/signup?request_clinic=true");
-  const requesterEmail = getValue(formData, "requester_email");
+  const clinicName = getValue(formData, "clinic_name");
+  const requesterEmail = normalizeEmailAddress(getValue(formData, "requester_email"));
   const requesterFirstName = getValue(formData, "requester_first_name");
   const requesterLastName = getValue(formData, "requester_last_name");
   const password = getValue(formData, "password");
+  const contactEmail = normalizeEmailAddress(getValue(formData, "contact_email"));
 
   if (password.length < 8) {
     redirectWithPath(redirectPath, "error", "Password must be at least 8 characters.");
   }
+
+  await ensureClinicRequestAvailability(admin, {
+    clinicName,
+    requesterEmail,
+    redirectPath,
+  });
 
   let existingUser = null;
 
@@ -484,17 +645,17 @@ export async function requestClinicAction(formData: FormData) {
   });
 
   if (profileError) {
-    await admin.auth.admin.deleteUser(requesterUserId);
-    redirectWithPath(redirectPath, "error", profileError.message);
+    const cleanedUp = await deleteAuthUserBestEffort(admin, requesterUserId);
+    redirectWithPath(redirectPath, "error", withCleanupWarning(profileError.message, cleanedUp, "account"));
   }
 
   const { error } = await admin.from("clinic_requests").insert({
-    clinic_name: getValue(formData, "clinic_name"),
+    clinic_name: clinicName,
     address_line_1: getValue(formData, "address_line_1"),
     city: getValue(formData, "city"),
     state: getValue(formData, "state"),
     postal_code: getValue(formData, "postal_code"),
-    contact_email: getValue(formData, "contact_email"),
+    contact_email: contactEmail,
     contact_phone: getValue(formData, "contact_phone"),
     fax_number: optionalValue(formData, "fax_number"),
     requester_first_name: requesterFirstName,
@@ -504,8 +665,8 @@ export async function requestClinicAction(formData: FormData) {
   });
 
   if (error) {
-    await admin.auth.admin.deleteUser(requesterUserId);
-    redirectWithPath(redirectPath, "error", error.message);
+    const cleanedUp = await deleteAuthUserBestEffort(admin, requesterUserId);
+    redirectWithPath(redirectPath, "error", withCleanupWarning(error.message, cleanedUp, "account"));
   }
 
   revalidatePath("/admin/clinics");
@@ -543,6 +704,25 @@ export async function approveClinicRequestAction(formData: FormData) {
     redirectWithPath(redirectPath, "error", "This clinic request was already rejected.");
   }
 
+  const { data: existingCompany, error: existingCompanyError } = await admin
+    .from("companies")
+    .select("id")
+    .ilike("name", request.clinic_name)
+    .limit(1)
+    .maybeSingle();
+
+  if (existingCompanyError) {
+    redirectWithPath(redirectPath, "error", existingCompanyError.message);
+  }
+
+  if (existingCompany) {
+    redirectWithPath(
+      redirectPath,
+      "error",
+      "A clinic with this name already exists. This request must be denied or changed before it can be approved.",
+    );
+  }
+
   const { data: company, error: companyError } = await admin
     .from("companies")
     .insert({
@@ -576,6 +756,27 @@ export async function approveClinicRequestAction(formData: FormData) {
   }
 
   let userId = existingUser?.id;
+  let createdUserDuringApproval = false;
+  let previousProfile: RestorableUserProfile | null = null;
+
+  if (userId) {
+    const { data: existingProfile, error: existingProfileError } = await admin
+      .from("user_profiles")
+      .select("id, company_id, first_name, last_name, role, account_status, notes")
+      .eq("id", userId)
+      .maybeSingle();
+
+    if (existingProfileError) {
+      const companyDeleted = await deleteCompanyBestEffort(admin, company.id);
+      redirectWithPath(
+        redirectPath,
+        "error",
+        withCleanupWarning(existingProfileError.message, companyDeleted, "clinic"),
+      );
+    }
+
+    previousProfile = (existingProfile ?? null) as RestorableUserProfile | null;
+  }
 
   if (!userId) {
     const { data: invitedUser, error: inviteError } = await admin.auth.admin.inviteUserByEmail(request.requester_email, {
@@ -586,10 +787,20 @@ export async function approveClinicRequestAction(formData: FormData) {
     });
 
     if (inviteError || !invitedUser.user) {
-      redirectWithPath(redirectPath, "error", inviteError?.message ?? "Clinic admin invitation could not be created.");
+      const companyDeleted = await deleteCompanyBestEffort(admin, company.id);
+      redirectWithPath(
+        redirectPath,
+        "error",
+        withCleanupWarning(
+          inviteError?.message ?? "Clinic requester invitation could not be created.",
+          companyDeleted,
+          "clinic",
+        ),
+      );
     }
 
     userId = invitedUser.user.id;
+    createdUserDuringApproval = true;
   }
 
   const { error: profileError } = await admin.from("user_profiles").upsert({
@@ -602,7 +813,20 @@ export async function approveClinicRequestAction(formData: FormData) {
   });
 
   if (profileError) {
-    redirectWithPath(redirectPath, "error", profileError.message);
+    const companyDeleted = await deleteCompanyBestEffort(admin, company.id);
+    const userCleanedUp = createdUserDuringApproval
+      ? await deleteAuthUserBestEffort(admin, userId)
+      : true;
+    redirectWithPath(
+      redirectPath,
+      "error",
+      [
+        withCleanupWarning(profileError.message, companyDeleted, "clinic"),
+        createdUserDuringApproval ? cleanupWarningText(userCleanedUp, "account") : "",
+      ]
+        .filter(Boolean)
+        .join(" "),
+    );
   }
 
   const { error: updateError } = await admin
@@ -611,7 +835,22 @@ export async function approveClinicRequestAction(formData: FormData) {
     .eq("id", requestId);
 
   if (updateError) {
-    redirectWithPath(redirectPath, "error", updateError.message);
+    const companyDeleted = await deleteCompanyBestEffort(admin, company.id);
+    const profileRolledBack = createdUserDuringApproval
+      ? await deleteAuthUserBestEffort(admin, userId)
+      : await restoreUserProfileBestEffort(admin, previousProfile);
+    redirectWithPath(
+      redirectPath,
+      "error",
+      [
+        withCleanupWarning(updateError.message, companyDeleted, "clinic"),
+        createdUserDuringApproval
+          ? cleanupWarningText(profileRolledBack, "account")
+          : cleanupWarningText(profileRolledBack, "user profile"),
+      ]
+        .filter(Boolean)
+        .join(" "),
+    );
   }
 
   revalidatePath("/");
@@ -628,12 +867,53 @@ export async function denyClinicRequestAction(formData: FormData) {
 
   const { data: request, error: requestError } = await admin
     .from("clinic_requests")
-    .select("requester_email")
+    .select("requester_email, status")
     .eq("id", requestId)
     .single();
 
   if (requestError || !request) {
     redirectWithPath(redirectPath, "error", requestError?.message ?? "Clinic request could not be found.");
+  }
+
+  if (request.status === "approved") {
+    redirectWithPath(redirectPath, "error", "Approved clinic requests cannot be denied.");
+  }
+
+  if (request.status === "rejected") {
+    redirectWithPath(redirectPath, "message", "This clinic request is already denied.");
+  }
+
+  const requesterUser = await findAuthUserByEmail(request.requester_email).catch((lookupError) => {
+    redirectWithPath(
+      redirectPath,
+      "error",
+      lookupError instanceof Error ? lookupError.message : "The requester account could not be checked.",
+    );
+  });
+
+  let previousAccountStatus: "pending" | "approved" | "denied" | null = null;
+
+  if (requesterUser) {
+    const { data: existingProfile, error: existingProfileError } = await admin
+      .from("user_profiles")
+      .select("account_status")
+      .eq("id", requesterUser.id)
+      .maybeSingle();
+
+    if (existingProfileError) {
+      redirectWithPath(redirectPath, "error", existingProfileError.message);
+    }
+
+    previousAccountStatus = (existingProfile?.account_status as "pending" | "approved" | "denied" | null) ?? null;
+
+    const { error: profileError } = await admin
+      .from("user_profiles")
+      .update({ account_status: "denied" })
+      .eq("id", requesterUser.id);
+
+    if (profileError) {
+      redirectWithPath(redirectPath, "error", profileError.message);
+    }
   }
 
   const { error } = await admin
@@ -642,28 +922,24 @@ export async function denyClinicRequestAction(formData: FormData) {
     .eq("id", requestId);
 
   if (error) {
-    redirectWithPath(redirectPath, "error", error.message);
-  }
-
-  try {
-    const requesterUser = await findAuthUserByEmail(request.requester_email);
-
     if (requesterUser) {
-      const { error: profileError } = await admin
-        .from("user_profiles")
-        .update({ account_status: "denied" })
-        .eq("id", requesterUser.id);
+      const profileRolledBack = previousAccountStatus
+        ? await admin
+            .from("user_profiles")
+            .update({ account_status: previousAccountStatus })
+            .eq("id", requesterUser.id)
+        : null;
 
-      if (profileError) {
-        redirectWithPath(redirectPath, "error", profileError.message);
+      if (profileRolledBack?.error) {
+        redirectWithPath(
+          redirectPath,
+          "error",
+          withCleanupWarning(error.message, false, "user profile"),
+        );
       }
     }
-  } catch (lookupError) {
-    redirectWithPath(
-      redirectPath,
-      "error",
-      lookupError instanceof Error ? lookupError.message : "The requester account could not be updated.",
-    );
+
+    redirectWithPath(redirectPath, "error", error.message);
   }
 
   revalidatePath("/admin/clinics");
@@ -722,7 +998,8 @@ export async function bootstrapAdminAction(formData: FormData) {
   });
 
   if (profileError) {
-    redirectWithPath(redirectPath, "error", profileError.message);
+    const cleanedUp = await deleteAuthUserBestEffort(admin, userId);
+    redirectWithPath(redirectPath, "error", withCleanupWarning(profileError.message, cleanedUp, "account"));
   }
 
   const supabase = await createSupabaseServerClient();

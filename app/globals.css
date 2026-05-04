@@ -1707,18 +1707,38 @@ textarea {
 .document-directory-row > div {
   display: grid;
   gap: 6px;
+  min-width: 0;
+}
+
+.document-directory-row strong {
+  color: #17324a;
+  font-size: 1rem;
+  line-height: 1.28;
+}
+
+.document-directory-row span {
+  color: #4f6880;
+  font-size: 0.98rem;
+  line-height: 1.5;
+  word-break: break-word;
 }
 
 .list-row__actions {
   display: flex;
   justify-content: flex-end;
   flex-wrap: wrap;
+  align-items: center;
   gap: 10px;
   margin: 0;
 }
 
 .list-row__actions form {
   margin: 0;
+}
+
+.document-directory-row .list-row__actions .button {
+  min-width: 116px;
+  font-weight: 700;
 }
 
 .document-add-form {
