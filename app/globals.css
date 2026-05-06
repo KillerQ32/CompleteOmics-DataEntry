@@ -1530,7 +1530,7 @@ textarea {
 
 .customer-record-list--documents .admin-record-list__head,
 .customer-record-list--documents .admin-record__summary {
-  grid-template-columns: minmax(190px, 1.3fr) minmax(150px, 1fr) minmax(120px, 0.9fr) minmax(120px, 0.85fr) 82px;
+  grid-template-columns: minmax(190px, 1.2fr) minmax(150px, 0.95fr) minmax(120px, 0.8fr) minmax(140px, 0.85fr) minmax(228px, 1fr);
   gap: 10px;
 }
 
@@ -1594,6 +1594,34 @@ textarea {
 .admin-record__actions {
   display: grid;
   justify-items: end;
+}
+
+.admin-record__actions--document {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.admin-record__quick-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 68px;
+  padding: 7px 10px;
+  border: 1px solid rgba(31, 95, 145, 0.14);
+  border-radius: 999px;
+  color: #1f5f91;
+  background: rgba(62, 143, 196, 0.08);
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.admin-record__quick-link:hover {
+  background: rgba(31, 95, 145, 0.12);
 }
 
 .admin-record__toggle {
@@ -2800,6 +2828,28 @@ textarea {
   margin: 0;
 }
 
+.contact-message-card__response,
+.contact-message-card__reply {
+  grid-column: 1 / -1;
+}
+
+.contact-message-card__response {
+  display: grid;
+  gap: 8px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: rgba(214, 17, 36, 0.05);
+}
+
+.contact-message-card__reply {
+  display: grid;
+  gap: 12px;
+}
+
+.contact-message-card__reply .field {
+  margin: 0;
+}
+
 .contact-message-card > span {
   grid-column: 1 / -1;
 }
@@ -2807,6 +2857,8 @@ textarea {
 .contact-message-card__actions {
   grid-column: 1 / -1;
   display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
   justify-content: flex-end;
   margin: 0;
 }

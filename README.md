@@ -7,6 +7,7 @@ This project supports:
 - customer login and admin login
 - admin approval for customer account creation
 - clinic request intake with admin approval
+- email notifications for customer account requests, account decisions, clinic approvals, and admin contact replies
 - patient, sample, package, and document management
 - searchable clinic-scoped and admin-wide record views
 - sample review workflow: `submitted`, `mailed`, `accepted`, `rejected`
@@ -38,6 +39,7 @@ This project supports:
 - can manage all clinics and all records
 - can approve or deny customer account requests
 - can approve or deny clinic requests
+- can respond to contact-page messages from the admin console and email the response back to the customer
 - can mark samples received
 - can accept or reject received samples and attach rejection reasons
 - can delete records across the system
@@ -51,6 +53,7 @@ This project supports:
 3. `user_profiles.account_status` is set to `pending`.
 4. Admin reviews the request in `Admin -> Accounts -> Account Requests`.
 5. Admin approves or denies the request.
+6. The requester receives an email confirmation when the request is submitted and another email when the request is approved or denied, if email delivery is configured.
 
 ### Clinic request creation
 
@@ -59,6 +62,7 @@ This project supports:
 3. A row is added to `clinic_requests`.
 4. Admin reviews the request in `Admin -> Clinics -> Clinic Requests`.
 5. If approved, the clinic is created and the requester is attached as an approved customer account.
+6. When approved, the requester email and clinic contact email are notified that the clinic and linked login are ready.
 
 ## Database Design
 
@@ -127,9 +131,24 @@ Current example keys:
 NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:54321
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your_publishable_key
 SUPABASE_SERVICE_ROLE_KEY=your_secret_key
+RESEND_API_KEY=your_resend_api_key
+EMAIL_FROM=Complete Omics <no-reply@your-domain.com>
+EMAIL_REPLY_TO=info@your-domain.com
 ```
 
 If you start the local Supabase stack fresh, use `npm run db:status` or `supabase status` to confirm the current local credentials.
+
+### Email notifications
+
+This project is wired for outbound email through the `Resend` HTTP API.
+
+For real delivery you need:
+
+- a verified sender identity or domain
+- a real API key in `RESEND_API_KEY`
+- a sender address in `EMAIL_FROM`
+
+You do not need to use a personal inbox, but you do need a sender address your provider will allow, such as `no-reply@your-domain.com`.
 
 ### Start the app
 

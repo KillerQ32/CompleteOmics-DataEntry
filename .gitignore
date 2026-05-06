@@ -3,3 +3,8 @@ node_modules
 .test-dist
 tsconfig.tsbuildinfo
 .env.local
+.codex-logs/
+.dev.err.log
+.dev.log
+.next-dev.err.log
+.next-dev.out.log

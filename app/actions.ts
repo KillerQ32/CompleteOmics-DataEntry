@@ -3,6 +3,13 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import {
+  emailOutcomeMessage,
+  sendClinicApprovedEmail,
+  sendContactResponseEmail,
+  sendCustomerAccountRequestReceivedEmail,
+  sendCustomerAccountStatusEmail,
+} from "../lib/email";
+import {
   exceedsIcd10CodeLimit,
   isSampleReviewDecisionAllowed,
   normalizeIcd10Codes,
@@ -58,6 +65,14 @@ function cleanupWarningText(cleanupSucceeded: boolean, subject: string) {
   return cleanupSucceeded
     ? ""
     : `Cleanup also failed for the partial ${subject}; please review it in the admin portal.`;
+}
+
+function withEmailOutcome(
+  baseMessage: string,
+  label: string,
+  outcome: Awaited<ReturnType<typeof sendCustomerAccountRequestReceivedEmail>>,
+) {
+  return `${baseMessage} ${emailOutcomeMessage(label, outcome)}`.trim();
 }
 
 async function deleteAuthUserBestEffort(admin: ReturnType<typeof createSupabaseAdminClient>, userId: string) {
@@ -199,6 +214,25 @@ async function findAuthUserByEmail(email: string) {
   }
 
   return data.users.find((authUser) => authUser.email?.toLowerCase() === normalizedEmail) ?? null;
+}
+
+async function getAuthUserEmailById(
+  admin: ReturnType<typeof createSupabaseAdminClient>,
+  userId: string,
+) {
+  try {
+    const { data, error } = await admin.auth.admin.getUserById(userId);
+
+    if (error) {
+      console.error("Failed to load auth user by id", { userId, error: error.message });
+      return null;
+    }
+
+    return normalizeEmailAddress(data.user.email ?? null);
+  } catch (error) {
+    console.error("Failed to load auth user by id", { userId, error });
+    return null;
+  }
 }
 
 function parseLookupValue(value: string | null) {
@@ -517,6 +551,7 @@ export async function signUpAction(formData: FormData) {
 
   const firstName = getValue(formData, "first_name");
   const lastName = getValue(formData, "last_name");
+  const email = normalizeEmailAddress(getValue(formData, "email"));
   const companyId = getValue(formData, "company_id");
   const notes = optionalValue(formData, "notes");
 
@@ -526,7 +561,7 @@ export async function signUpAction(formData: FormData) {
 
   const { data: companyExists, error: companyError } = await admin
     .from("companies")
-    .select("id")
+    .select("id, name")
     .eq("id", companyId)
     .maybeSingle();
 
@@ -535,7 +570,7 @@ export async function signUpAction(formData: FormData) {
   }
 
   const { data, error } = await supabase.auth.signUp({
-    email: getValue(formData, "email"),
+    email,
     password: getValue(formData, "password"),
     options: {
       data: {
@@ -570,8 +605,18 @@ export async function signUpAction(formData: FormData) {
     redirectWithPath(redirectPath, "error", withCleanupWarning(profileError.message, cleanedUp, "account"));
   }
 
+  const notificationResult = await sendCustomerAccountRequestReceivedEmail({
+    email,
+    firstName,
+    clinicName: companyExists.name,
+  });
+
   revalidatePath("/");
-  redirectWithPath(redirectPath, "message", "Account created and sent for admin approval.");
+  redirectWithPath(
+    redirectPath,
+    "message",
+    withEmailOutcome("Account created and sent for admin approval.", "Confirmation", notificationResult),
+  );
 }
 
 export async function requestClinicAction(formData: FormData) {
@@ -853,10 +898,25 @@ export async function approveClinicRequestAction(formData: FormData) {
     );
   }
 
+  const clinicNotificationResult = await sendClinicApprovedEmail({
+    clinicName: request.clinic_name,
+    requesterEmail: request.requester_email,
+    requesterFirstName: request.requester_first_name,
+    clinicContactEmail: request.contact_email,
+  });
+
   revalidatePath("/");
   revalidatePath("/admin/clinics");
   revalidatePath("/admin/accounts");
-  redirectWithPath(redirectPath, "message", "Clinic approved and requester assigned as a customer account.");
+  redirectWithPath(
+    redirectPath,
+    "message",
+    withEmailOutcome(
+      "Clinic approved and requester assigned as a customer account.",
+      "Clinic notification",
+      clinicNotificationResult,
+    ),
+  );
 }
 
 export async function denyClinicRequestAction(formData: FormData) {
@@ -1181,7 +1241,7 @@ export async function updateAccountApprovalAction(formData: FormData) {
 
   const { data: targetProfile, error: targetError } = await admin
     .from("user_profiles")
-    .select("id, role, company_id")
+    .select("id, role, company_id, first_name, last_name")
     .eq("id", profileId)
     .single();
 
@@ -1198,9 +1258,39 @@ export async function updateAccountApprovalAction(formData: FormData) {
     redirectWithPath(redirectPath, "error", error.message);
   }
 
+  let statusMessage = `Account ${nextStatus}.`;
+
+  if (nextStatus === "approved" || nextStatus === "denied") {
+    const authEmail = await getAuthUserEmailById(admin, profileId);
+    let clinicName: string | null = null;
+
+    if (targetProfile.company_id) {
+      const { data: company } = await admin
+        .from("companies")
+        .select("name")
+        .eq("id", targetProfile.company_id)
+        .maybeSingle();
+
+      clinicName = company?.name ?? null;
+    }
+
+    if (authEmail) {
+      const emailResult = await sendCustomerAccountStatusEmail({
+        email: authEmail,
+        firstName: targetProfile.first_name,
+        clinicName,
+        status: nextStatus,
+      });
+
+      statusMessage = withEmailOutcome(statusMessage, "Account status", emailResult);
+    } else {
+      statusMessage = `${statusMessage} Account status email not sent because no auth email could be found.`;
+    }
+  }
+
   revalidatePath("/");
   revalidatePath("/admin/accounts");
-  redirectWithPath(redirectPath, "message", `Account ${nextStatus}.`);
+  redirectWithPath(redirectPath, "message", statusMessage);
 }
 
 export async function updateCustomerAccountAction(formData: FormData) {
@@ -1956,6 +2046,69 @@ export async function deleteContactMessageAction(formData: FormData) {
 
   revalidatePath("/");
   redirectWithPath(redirectPath, "message", "Contact message removed.");
+}
+
+export async function respondToContactMessageAction(formData: FormData) {
+  const { user } = await requireAdminSession();
+  const admin = createSupabaseAdminClient();
+  const messageId = getValue(formData, "id");
+  const redirectPath = getRedirectPath(formData, "/admin/contact");
+  const adminResponse = getValue(formData, "admin_response");
+
+  if (!adminResponse) {
+    redirectWithPath(redirectPath, "error", "Enter a response before sending it.");
+  }
+
+  const { data: contactMessage, error: contactMessageError } = await admin
+    .from("contact_messages")
+    .select("id, email, first_name")
+    .eq("id", messageId)
+    .single();
+
+  if (contactMessageError || !contactMessage) {
+    redirectWithPath(redirectPath, "error", contactMessageError?.message ?? "Contact message could not be found.");
+  }
+
+  const respondedAt = new Date().toISOString();
+  const { error: updateError } = await admin
+    .from("contact_messages")
+    .update({
+      admin_response: adminResponse,
+      responded_at: respondedAt,
+      responded_by: user.id,
+      response_email_sent_at: null,
+      status: "reviewed",
+    })
+    .eq("id", messageId);
+
+  if (updateError) {
+    redirectWithPath(redirectPath, "error", updateError.message);
+  }
+
+  const emailResult = await sendContactResponseEmail({
+    email: contactMessage.email,
+    firstName: contactMessage.first_name,
+    adminResponse,
+  });
+
+  if (emailResult.status === "sent") {
+    const { error: sentAtError } = await admin
+      .from("contact_messages")
+      .update({ response_email_sent_at: new Date().toISOString() })
+      .eq("id", messageId);
+
+    if (sentAtError) {
+      redirectWithPath(redirectPath, "error", sentAtError.message);
+    }
+  }
+
+  revalidatePath("/");
+  revalidatePath("/admin/contact");
+  redirectWithPath(
+    redirectPath,
+    "message",
+    withEmailOutcome("Admin response saved.", "Customer response", emailResult),
+  );
 }
 
 export async function markSampleReceivedAction(formData: FormData) {

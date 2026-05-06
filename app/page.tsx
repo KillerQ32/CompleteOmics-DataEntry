@@ -16,6 +16,7 @@ import {
   markSampleReceivedAction,
   denyClinicRequestAction,
   reviewIncomingSampleAction,
+  respondToContactMessageAction,
   signInAction,
   signOutAction,
   signUpAction,
@@ -232,6 +233,10 @@ type ContactMessageRow = {
   source: string | null;
   message: string;
   status: string;
+  admin_response: string | null;
+  responded_at: string | null;
+  responded_by: string | null;
+  response_email_sent_at: string | null;
   created_at: string;
 };
 
@@ -1906,7 +1911,21 @@ function CustomerWorkspace({
                     <div>
                       <strong>{formatDateTime(document.created_at ?? null)}</strong>
                     </div>
-                    <div className="admin-record__actions">
+                    <div className="admin-record__actions admin-record__actions--document">
+                      <a
+                        className="admin-record__quick-link"
+                        href={`/documents/${document.id}`}
+                        rel="noreferrer"
+                        target="_blank"
+                      >
+                        View
+                      </a>
+                      <a
+                        className="admin-record__quick-link"
+                        href={`/documents/${document.id}?download=1`}
+                      >
+                        Download
+                      </a>
                       <span className="admin-record__toggle">Edit</span>
                     </div>
                   </summary>
@@ -1933,20 +1952,6 @@ function CustomerWorkspace({
                       </div>
                     </div>
                     <div className="admin-record__details-actions">
-                      <a
-                        className="button button--ghost button--compact"
-                        href={`/documents/${document.id}`}
-                        rel="noreferrer"
-                        target="_blank"
-                      >
-                        View
-                      </a>
-                      <a
-                        className="button button--ghost button--compact"
-                        href={`/documents/${document.id}?download=1`}
-                      >
-                        Download
-                      </a>
                       <button
                         className="button button--danger button--compact"
                         type="submit"
@@ -2074,7 +2079,7 @@ function CustomerWorkspace({
                     <input name="email" type="email" defaultValue={userEmail} placeholder="Enter here" required />
                   </div>
                   <div className="field">
-                    <label>Institution</label>
+                    <label>Clinic</label>
                     <input name="institution" defaultValue={company?.name ?? ""} placeholder="Enter here" />
                   </div>
                   <div className="field">
@@ -2086,20 +2091,6 @@ function CustomerWorkspace({
                       <option>Customer portal support</option>
                       <option>Ask a question</option>
                       <option>Request a quote</option>
-                      <option>Other</option>
-                    </select>
-                  </div>
-                  <div className="field">
-                    <label>How did you hear about us?</label>
-                    <select name="source" defaultValue="">
-                      <option value="" disabled>
-                        Select a channel
-                      </option>
-                      <option>Complete Omics website</option>
-                      <option>Clinic referral</option>
-                      <option>Conference or event</option>
-                      <option>Publication</option>
-                      <option>Search engine</option>
                       <option>Other</option>
                     </select>
                   </div>
@@ -2350,7 +2341,7 @@ export async function loadAdminWorkspaceData(
 
   let contactMessagesQuery = admin
     .from("contact_message_directory")
-    .select("id, user_id, company_id, company_name, first_name, last_name, email, institution, purpose, source, message, status, created_at")
+    .select("id, user_id, company_id, company_name, first_name, last_name, email, institution, purpose, source, message, status, admin_response, responded_at, responded_by, response_email_sent_at, created_at")
     .order("created_at", { ascending: false })
     .limit(50);
 
@@ -4297,13 +4288,43 @@ export function AdminWorkspace({
                   <span>{contactMessage.status}</span>
                 </div>
                 <p>{contactMessage.message}</p>
-                {contactMessage.source && <span>Source: {contactMessage.source}</span>}
-                <form action={deleteContactMessageAction} className="contact-message-card__actions">
+                {contactMessage.admin_response && (
+                  <div className="contact-message-card__response">
+                    <strong>Admin response</strong>
+                    <p>{contactMessage.admin_response}</p>
+                    <span>
+                      {contactMessage.response_email_sent_at
+                        ? `Emailed ${formatDateTime(contactMessage.response_email_sent_at)}`
+                        : "Saved in console; email not sent yet"}
+                    </span>
+                  </div>
+                )}
+                <form action={respondToContactMessageAction} className="contact-message-card__reply">
                   <input type="hidden" name="id" value={contactMessage.id} />
                   <input type="hidden" name="redirect_to" value="/admin/contact" />
-                  <button className="button button--danger button--compact" type="submit">
-                    Delete Message
-                  </button>
+                  <div className="field field--compact">
+                    <label>Response</label>
+                    <textarea
+                      name="admin_response"
+                      rows={4}
+                      defaultValue={contactMessage.admin_response ?? ""}
+                      placeholder="Write the reply that should be emailed to this customer."
+                      required
+                    />
+                  </div>
+                  <div className="contact-message-card__actions">
+                    <button className="button button--secondary button--compact" type="submit">
+                      {contactMessage.admin_response ? "Update and Email Response" : "Send Response"}
+                    </button>
+                    <button
+                      className="button button--danger button--compact"
+                      type="submit"
+                      formAction={deleteContactMessageAction}
+                      formNoValidate
+                    >
+                      Delete Message
+                    </button>
+                  </div>
                 </form>
               </article>
             ))}
