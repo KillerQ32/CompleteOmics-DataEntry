@@ -10,12 +10,12 @@ insert into public.companies (
 )
 values (
   '99999999-9999-9999-9999-999999999999',
-  'Complete Omics Admin Test Clinic',
-  '100 Portal Way',
-  'Columbia',
+  'Demo Cardiology Clinic',
+  '100 Example Way',
+  'Baltimore',
   'MD',
   '21046',
   '443-555-0101',
-  'admin-test@completeomics.example'
+  'clinic-admin@example.com'
 )
 on conflict (id) do nothing;
