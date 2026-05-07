@@ -1,5 +1,7 @@
 # CompleteOmics-DataEntry
 
+Public portfolio-safe version of the clinical intake and operations portal built during my internship work. Company-internal documents, runtime logs, and local database dump outputs are intentionally omitted from this public-facing copy.
+
 Clinical intake and operations portal for Complete Omics, built with `Next.js`, `React`, `Supabase`, and `Docker`.
 
 This project supports:
@@ -220,6 +222,7 @@ Current automated coverage includes:
 - [tests](/c:/Users/qabal/OneDrive/Documents/CompleteOmics-DataEntry/tests): unit and Supabase-backed integration tests
 - [scripts/data-transfer](/c:/Users/qabal/OneDrive/Documents/CompleteOmics-DataEntry/scripts/data-transfer): export/import scripts
 - [data-engineering](/c:/Users/qabal/OneDrive/Documents/CompleteOmics-DataEntry/data-engineering): manual ETL/data processing workspace
+- `backups/`: local export output folder for generated SQL dumps; dump contents are ignored in the public repo
 
 ## Data Transfer
 
@@ -252,8 +255,8 @@ Main folders:
 - `data-engineering/workflows/python`
 - `data-engineering/workflows/notebooks`
 
-## Deployment Notes
+## Public Release Notes
 
-Self-hosting notes for moving the Supabase-backed stack to a company server live in:
-
-- [docs/supabase-self-hosting.md](/c:/Users/qabal/OneDrive/Documents/CompleteOmics-DataEntry/docs/supabase-self-hosting.md)
+- Internal handoff documents and company-specific deployment notes are intentionally excluded from this public version.
+- Generated logs and SQL dump files are ignored and should stay local only.
+- Before publishing a fork or derivative, confirm you have permission to reuse any company branding assets in `public/`.

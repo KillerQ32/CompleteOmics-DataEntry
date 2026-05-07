@@ -24,6 +24,8 @@ This creates:
 
 - `.\backups\company-sample-data.sql`
 
+That dump file is generated locally and is intentionally ignored in the public repo.
+
 ## Import into a target server
 
 Example:
