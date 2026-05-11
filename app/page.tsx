@@ -2431,6 +2431,7 @@ export async function loadAdminWorkspaceData(
         .from("admin_user_directory")
         .select("id, first_name, last_name, role, account_status, company_id, company_name, notes, created_at")
         .match(!isUltimateAdmin && staffCompanyId ? { company_id: staffCompanyId } : {})
+        .neq("role", "admin")
         .order("created_at", { ascending: false }),
       sampleQuery,
       patientQuery,

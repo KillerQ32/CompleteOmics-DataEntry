@@ -1008,72 +1008,12 @@ export async function denyClinicRequestAction(formData: FormData) {
 }
 
 export async function bootstrapAdminAction(formData: FormData) {
-  const admin = createSupabaseAdminClient();
   const redirectPath = getRedirectPath(formData);
-  const firstName = getValue(formData, "first_name");
-  const lastName = getValue(formData, "last_name");
-  const email = getValue(formData, "email");
-  const password = getValue(formData, "password");
-
-  const { count, error: countError } = await admin
-    .from("user_profiles")
-    .select("id", { count: "exact", head: true })
-    .eq("role", "admin");
-
-  if (countError) {
-    redirectWithPath(redirectPath, "error", countError.message);
-  }
-
-  if ((count ?? 0) > 0) {
-    redirectWithPath(redirectPath, "error", "An admin account already exists. Sign in and manage users from the admin portal.");
-  }
-
-  const { data, error } = await admin.auth.admin.createUser({
-    email,
-    password,
-    email_confirm: true,
-    user_metadata: {
-      first_name: firstName,
-      last_name: lastName,
-    },
-  });
-
-  if (error) {
-    redirectWithPath(redirectPath, "error", error.message);
-  }
-
-  const userId = data.user?.id;
-
-  if (!userId) {
-    redirectWithPath(redirectPath, "error", "Admin creation did not return a user record.");
-  }
-
-  const { error: profileError } = await admin.from("user_profiles").upsert({
-    id: userId,
-    company_id: null,
-    first_name: firstName,
-    last_name: lastName,
-    role: "admin",
-    account_status: "approved",
-  });
-
-  if (profileError) {
-    const cleanedUp = await deleteAuthUserBestEffort(admin, userId);
-    redirectWithPath(redirectPath, "error", withCleanupWarning(profileError.message, cleanedUp, "account"));
-  }
-
-  const supabase = await createSupabaseServerClient();
-  const { error: signInError } = await supabase.auth.signInWithPassword({
-    email,
-    password,
-  });
-
-  if (signInError) {
-    redirectWithPath(redirectPath, "error", signInError.message);
-  }
-
-  revalidatePath("/");
-  redirectWithPath(redirectPath, "message", "Admin account created. You are now signed in.");
+  redirectWithPath(
+    redirectPath,
+    "error",
+    "Admin accounts cannot be created through the app. Provision them directly in Supabase or contact the system administrator.",
+  );
 }
 
 export async function signOutAction(formData: FormData) {
@@ -1198,14 +1138,19 @@ export async function updateUserProfileAction(formData: FormData) {
   const admin = createSupabaseAdminClient();
   const profileId = getValue(formData, "id");
   const nextRole = getValue(formData, "role");
-  const nextCompanyId = nextRole === "admin" ? null : optionalValue(formData, "company_id");
   const redirectPath = getRedirectPath(formData, "/admin/accounts");
+
+  if (nextRole === "admin") {
+    redirectWithPath(redirectPath, "error", "Admin accounts cannot be created or promoted through the app.");
+  }
 
   if (user.id === profileId && nextRole !== "admin") {
     redirectWithPath(redirectPath, "error", "Your current session must remain an admin.");
   }
 
-  if (nextRole !== "admin" && !nextCompanyId) {
+  const nextCompanyId = optionalValue(formData, "company_id");
+
+  if (!nextCompanyId) {
     redirectWithPath(redirectPath, "error", "Customer accounts must be attached to an approved clinic.");
   }
 

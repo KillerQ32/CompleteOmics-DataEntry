@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { bootstrapAdminAction, signInAction } from "../actions";
+import { signInAction } from "../actions";
 import { createSupabaseAdminClient } from "../../lib/supabase/admin";
 import { createSupabaseServerClient } from "../../lib/supabase/server";
 
@@ -38,7 +38,7 @@ export default async function AdminEntryPage({ searchParams }: { searchParams: S
     redirect("/admin/overview");
   }
 
-  const showBootstrapAdmin = (adminCount ?? 0) === 0;
+  const adminProvisioned = (adminCount ?? 0) > 0;
 
   return (
     <main className="admin-login-page">
@@ -76,6 +76,15 @@ export default async function AdminEntryPage({ searchParams }: { searchParams: S
             </div>
           )}
 
+          {!adminProvisioned && (
+            <div className="status-banner-shell">
+              <div className="status-banner status-banner--error">
+                No admin account is configured for this environment. Admin accounts must be provisioned directly in
+                Supabase and cannot be created from the app.
+              </div>
+            </div>
+          )}
+
           <form action={signInAction} className="admin-login-form">
             <input type="hidden" name="redirect_to" value="/admin/overview" />
             <input type="hidden" name="login_scope" value="admin" />
@@ -91,35 +100,6 @@ export default async function AdminEntryPage({ searchParams }: { searchParams: S
               Login
             </button>
           </form>
-
-          {showBootstrapAdmin && (
-            <form action={bootstrapAdminAction} className="admin-login-bootstrap">
-              <input type="hidden" name="redirect_to" value="/admin/overview" />
-              <p className="eyebrow">Initial Setup</p>
-              <h3>Create the first admin</h3>
-              <div className="form-grid">
-                <div className="field">
-                  <label>First name</label>
-                  <input name="first_name" required />
-                </div>
-                <div className="field">
-                  <label>Last name</label>
-                  <input name="last_name" required />
-                </div>
-                <div className="field">
-                  <label>Email</label>
-                  <input name="email" type="email" required />
-                </div>
-                <div className="field">
-                  <label>Password</label>
-                  <input name="password" type="password" minLength={8} required />
-                </div>
-              </div>
-              <button className="button button--secondary" type="submit">
-                Create Admin Account
-              </button>
-            </form>
-          )}
         </section>
       </section>
     </main>
