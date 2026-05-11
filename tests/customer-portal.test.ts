@@ -8,6 +8,7 @@ import {
   normalizeCustomerView,
   normalizeIntakeStep,
   normalizeSampleStatus,
+  resolveCustomerIntakeStep,
 } from "../lib/customer-portal";
 
 test("normalizeCustomerView keeps valid customer pages", () => {
@@ -73,7 +74,7 @@ test("nextDateString returns null for invalid input", () => {
 test("canAdvanceCustomerToSample allows an existing patient lookup", () => {
   assert.equal(
     canAdvanceCustomerToSample({
-      patientId: "patient-123",
+      patientId: "Jamie Cole | 11111111-1111-1111-1111-111111111111",
       firstName: "",
       lastName: "",
       dateOfBirth: "",
@@ -94,6 +95,18 @@ test("canAdvanceCustomerToSample allows a fully entered new patient", () => {
   );
 });
 
+test("canAdvanceCustomerToSample blocks arbitrary typed text in the existing patient field", () => {
+  assert.equal(
+    canAdvanceCustomerToSample({
+      patientId: "Jamie Cole",
+      firstName: "",
+      lastName: "",
+      dateOfBirth: "",
+    }),
+    false,
+  );
+});
+
 test("canAdvanceCustomerToSample blocks incomplete new-patient drafts", () => {
   assert.equal(
     canAdvanceCustomerToSample({
@@ -108,7 +121,7 @@ test("canAdvanceCustomerToSample blocks incomplete new-patient drafts", () => {
 
 test("canAdvanceCustomerToFiles requires both a valid patient step and sample number", () => {
   const patientDraft = {
-    patientId: "patient-123",
+    patientId: "Jamie Cole | 11111111-1111-1111-1111-111111111111",
     firstName: "",
     lastName: "",
     dateOfBirth: "",
@@ -116,4 +129,52 @@ test("canAdvanceCustomerToFiles requires both a valid patient step and sample nu
 
   assert.equal(canAdvanceCustomerToFiles(patientDraft, { sampleNumber: "SMP-1001" }), true);
   assert.equal(canAdvanceCustomerToFiles(patientDraft, { sampleNumber: "" }), false);
+});
+
+test("resolveCustomerIntakeStep sends incomplete patient drafts back to patient", () => {
+  assert.equal(
+    resolveCustomerIntakeStep(
+      "files",
+      {
+        patientId: "",
+        firstName: "Jamie",
+        lastName: "",
+        dateOfBirth: "",
+      },
+      { sampleNumber: "SMP-1001" },
+    ),
+    "patient",
+  );
+});
+
+test("resolveCustomerIntakeStep keeps the user on sample until sample details are entered", () => {
+  assert.equal(
+    resolveCustomerIntakeStep(
+      "review",
+      {
+        patientId: "Jamie Cole | 11111111-1111-1111-1111-111111111111",
+        firstName: "",
+        lastName: "",
+        dateOfBirth: "",
+      },
+      { sampleNumber: "" },
+    ),
+    "sample",
+  );
+});
+
+test("resolveCustomerIntakeStep allows later steps once patient and sample are valid", () => {
+  assert.equal(
+    resolveCustomerIntakeStep(
+      "package",
+      {
+        patientId: "Jamie Cole | 11111111-1111-1111-1111-111111111111",
+        firstName: "",
+        lastName: "",
+        dateOfBirth: "",
+      },
+      { sampleNumber: "SMP-1001" },
+    ),
+    "package",
+  );
 });

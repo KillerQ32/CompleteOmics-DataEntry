@@ -23,6 +23,16 @@ type CustomerSampleAdvanceDraft = {
   sampleNumber: string;
 };
 
+function isLookupSelection(value: string) {
+  const trimmed = value.trim();
+
+  if (!trimmed) {
+    return false;
+  }
+
+  return trimmed.includes(" | ") || /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(trimmed);
+}
+
 export function normalizeCustomerView(value: string): CustomerView {
   if (
     value === "samples" ||
@@ -67,7 +77,7 @@ export function nextDateString(value: string) {
 
 export function canAdvanceCustomerToSample(patientDraft: CustomerPatientAdvanceDraft) {
   return (
-    Boolean(patientDraft.patientId) ||
+    isLookupSelection(patientDraft.patientId) ||
     Boolean(patientDraft.firstName && patientDraft.lastName && patientDraft.dateOfBirth)
   );
 }
@@ -77,4 +87,20 @@ export function canAdvanceCustomerToFiles(
   sampleDraft: CustomerSampleAdvanceDraft,
 ) {
   return canAdvanceCustomerToSample(patientDraft) && Boolean(sampleDraft.sampleNumber);
+}
+
+export function resolveCustomerIntakeStep(
+  requestedStep: IntakeStep,
+  patientDraft: CustomerPatientAdvanceDraft,
+  sampleDraft: CustomerSampleAdvanceDraft,
+) {
+  if (!canAdvanceCustomerToSample(patientDraft)) {
+    return "patient";
+  }
+
+  if (!canAdvanceCustomerToFiles(patientDraft, sampleDraft)) {
+    return requestedStep === "patient" || requestedStep === "sample" ? requestedStep : "sample";
+  }
+
+  return requestedStep;
 }

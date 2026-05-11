@@ -41,6 +41,7 @@ import {
   normalizeCustomerView,
   normalizeIntakeStep,
   normalizeSampleStatus,
+  resolveCustomerIntakeStep,
 } from "../lib/customer-portal";
 import { isSampleReceived, isSampleReviewOverdue, SAMPLE_STATUS_OPTIONS } from "../lib/sample-workflow";
 import { createSupabaseServerClient } from "../lib/supabase/server";
@@ -714,6 +715,7 @@ function CustomerWorkspace({
   patientDraft,
   sampleDraft,
   packageDraft,
+  patientAttempted,
 }: {
   userEmail: string;
   profile: ProfileRow | null;
@@ -745,10 +747,13 @@ function CustomerWorkspace({
   patientDraft: IntakePatientDraft;
   sampleDraft: IntakeSampleDraft;
   packageDraft: IntakePackageDraft;
+  patientAttempted: boolean;
 }) {
   const canAdvanceToSample = canAdvanceCustomerToSample(patientDraft);
   const canAdvanceToFiles = canAdvanceCustomerToFiles(patientDraft, sampleDraft);
   const canAdvanceToPackage = canAdvanceToFiles;
+  const effectiveIntakeStep = resolveCustomerIntakeStep(intakeStep, patientDraft, sampleDraft);
+  const showPatientStepError = patientAttempted && !canAdvanceToSample;
   const customerCollectedBy = formatAccountDisplayName(profile?.first_name, profile?.last_name) || userEmail;
   const sampleSexValue = normalizeSexValue(sampleDraft.sex);
   const patientStepHref = buildPath("/", {
@@ -1465,34 +1470,40 @@ function CustomerWorkspace({
           </div>
 
           <div className="customer-steps">
-            <div className={`customer-step ${intakeStep === "patient" ? "customer-step--active" : ""}`}>
+            <div className={`customer-step ${effectiveIntakeStep === "patient" ? "customer-step--active" : ""}`}>
               <span>1</span>
               <strong>Patient</strong>
             </div>
-              <div className={`customer-step ${intakeStep === "sample" ? "customer-step--active" : ""}`}>
+              <div className={`customer-step ${effectiveIntakeStep === "sample" ? "customer-step--active" : ""}`}>
                 <span>2</span>
                 <strong>Sample</strong>
               </div>
-            <div className={`customer-step ${intakeStep === "files" ? "customer-step--active" : ""}`}>
+            <div className={`customer-step ${effectiveIntakeStep === "files" ? "customer-step--active" : ""}`}>
               <span>3</span>
               <strong>Files</strong>
             </div>
-            <div className={`customer-step ${intakeStep === "package" ? "customer-step--active" : ""}`}>
+            <div className={`customer-step ${effectiveIntakeStep === "package" ? "customer-step--active" : ""}`}>
               <span>4</span>
               <strong>FedEx</strong>
             </div>
-            <div className={`customer-step ${intakeStep === "review" ? "customer-step--active" : ""}`}>
+            <div className={`customer-step ${effectiveIntakeStep === "review" ? "customer-step--active" : ""}`}>
               <span>5</span>
               <strong>Review</strong>
             </div>
           </div>
 
-          {intakeStep === "patient" && (
+          {effectiveIntakeStep === "patient" && (
             <form className="panel form-panel customer-wizard" method="get">
               <input type="hidden" name="customer_view" value="intake" />
               <input type="hidden" name="intake_step" value="sample" />
               <input type="hidden" name="draft_key" value={intakeDraftKey} />
+              <input type="hidden" name="patient_attempted" value="true" />
               <h3>Find an existing patient or create a new one</h3>
+              {showPatientStepError && (
+                <div className="status-banner status-banner--error">
+                  Select an existing patient or enter first name, last name, and date of birth to continue.
+                </div>
+              )}
               <div className="field">
                 <label>Existing patient</label>
                 <input
@@ -1572,7 +1583,7 @@ function CustomerWorkspace({
             </form>
           )}
 
-          {intakeStep === "sample" && (
+          {effectiveIntakeStep === "sample" && (
             <form className="panel form-panel customer-wizard" method="get">
               <input type="hidden" name="customer_view" value="intake" />
               <input type="hidden" name="intake_step" value="files" />
@@ -1658,19 +1669,20 @@ function CustomerWorkspace({
                 <a className="button button--secondary" href={patientStepHref}>
                   Back to Patient
                 </a>
-                <button className="button button--primary" type="submit" disabled={!canAdvanceToSample}>
+                <button className="button button--primary" type="submit" disabled={!canAdvanceToFiles}>
                   Continue to Files
                 </button>
               </div>
             </form>
           )}
 
-          {intakeStep === "files" && (
+          {effectiveIntakeStep === "files" && (
             <div className="panel form-panel customer-wizard">
               <form action={uploadPendingIntakeDocumentAction} className="customer-intake-files-form">
                 <input type="hidden" name="draft_key" value={intakeDraftKey} />
                 <input type="hidden" name="redirect_to" value={filesStepHref} />
                 <h3>Upload documents for this intake</h3>
+                <p className="wizard-divider">This step may be skipped. Documents can be added later from the Documents page.</p>
                 <div className="field">
                   <label>File</label>
                   <input name="document" type="file" accept=".pdf,image/png,image/jpeg" required />
@@ -1701,7 +1713,7 @@ function CustomerWorkspace({
             </div>
           )}
 
-          {intakeStep === "package" && (
+          {effectiveIntakeStep === "package" && (
             <form className="panel form-panel customer-wizard" method="get">
               <input type="hidden" name="customer_view" value="intake" />
               <input type="hidden" name="intake_step" value="review" />
@@ -1734,6 +1746,7 @@ function CustomerWorkspace({
               <input type="hidden" name="hart_cadhs" value={sampleDraft.hartCadhs ? "true" : "false"} />
               <input type="hidden" name="hart_cve" value={sampleDraft.hartCve ? "true" : "false"} />
               <h3>Find an existing FedEx package, create a new one, or skip this step</h3>
+              <p className="wizard-divider">This step may be skipped. FedEx package information can be updated later.</p>
               {!canAdvanceToPackage && (
                 <div className="status-banner status-banner--error">
                   Enter the sample details before opening the FedEx step.
@@ -1771,7 +1784,7 @@ function CustomerWorkspace({
             </form>
           )}
 
-          {intakeStep === "review" && (
+          {effectiveIntakeStep === "review" && (
             <form action={createCustomerIntakeAction} className="panel form-panel customer-wizard">
               <input type="hidden" name="draft_key" value={intakeDraftKey} />
               <input type="hidden" name="patient_id" value={patientDraft.patientId} />
@@ -4360,6 +4373,7 @@ export default async function Home({ searchParams }: { searchParams: SearchParam
   const rejectedFilter = readParam(resolvedSearchParams, "rejected");
   const customerView = normalizeCustomerView(readParam(resolvedSearchParams, "customer_view"));
   const intakeStep = normalizeIntakeStep(readParam(resolvedSearchParams, "intake_step"));
+  const patientAttempted = readBooleanParam(resolvedSearchParams, "patient_attempted");
   const intakeDraftKey = readParam(resolvedSearchParams, "draft_key") || randomUUID();
   const patientDraft: IntakePatientDraft = {
     patientId: readParam(resolvedSearchParams, "patient_id"),
@@ -4585,6 +4599,7 @@ export default async function Home({ searchParams }: { searchParams: SearchParam
       patientDraft={patientDraft}
       sampleDraft={sampleDraft}
       packageDraft={packageDraft}
+      patientAttempted={patientAttempted}
     />
   );
 }
